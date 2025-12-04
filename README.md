@@ -1,4 +1,4 @@
-# Lynkr
+# Lynkr [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vishalveerareddy123/Lynkr)
 
 > It is a Cli tool which acts like a HTTP proxy that lets Claude Code CLI talk to non-Anthropic backends, manage local tools, and compose Model Context Protocol (MCP) servers with prompt caching, repo intelligence, and Git-aware automation.
 
@@ -44,6 +44,8 @@ Key highlights:
 The result is a self-hosted alternative that stays close to Anthropic’s ergonomics while remaining hackable for experimentation.
 
 > **Compatibility note:** Claude models hosted on Databricks work out of the box. Set `MODEL_PROVIDER=azure-anthropic` (and related credentials) to target the Azure-hosted Anthropic `/anthropic/v1/messages` endpoint. Additional providers will require future adapters.
+
+Further documentation and usage notes are available on [DeepWiki](https://deepwiki.com/vishalveerareddy123/Lynkr).
 
 ---
 
