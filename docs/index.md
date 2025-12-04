@@ -1,4 +1,5 @@
 
+<link rel="stylesheet" href="style.css">
 
 
 # Lynkr – Claude Code-Compatible Proxy for Databricks 

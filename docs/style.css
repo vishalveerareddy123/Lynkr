@@ -1,0 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&display=swap');
+
+body {
+  font-family: "Literata", serif;
+  background-color: #fbf8f3;
+  color: #222;
+  margin: auto;
+  max-width: 700px;
+  padding: 30px;
+  line-height: 1.65;
+}
+
+h1, h2, h3 {
+  font-weight: 600;
+}
