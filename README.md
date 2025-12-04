@@ -325,7 +325,7 @@ The compose file exposes:
 - Proxy HTTP API on `8080`
 - Optional SearxNG instance on `8888` (started automatically when `WEB_SEARCH_ENDPOINT` is the default)
 
-Workspace files are mounted into the container (`./:/workspace`), and `./data` is persisted for SQLite state.
+Workspace files are mounted into the container (`./:/workspace`), and `./data` is persisted for SQLite state. If you launch the proxy outside of this compose setup you must provide your own search backend and point `WEB_SEARCH_ENDPOINT` at it (for example, a self-hosted SearxNG instance). Without a reachable search service the `web_search` and `web_fetch` tools will return placeholder responses or fail.
 
 #### Manual Docker build
 
