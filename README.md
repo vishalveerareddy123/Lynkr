@@ -160,6 +160,10 @@ The result is a self-hosted alternative that stays close to Anthropic’s ergono
 npm install -g lynkr
 lynkr start
 
+# via Homebrew tap
+brew tap vishalveerareddy123/lynkr
+brew install vishalveerareddy123/lynkr/lynkr
+
 # or clone the repo
 git clone https://github.com/vishalveerareddy123/Lynkr.git
 cd Lynkr
@@ -333,6 +337,22 @@ docker run --rm -p 8080:8080 -p 8888:8888 \
 ```
 
 Adjust port and volume mappings to suit your environment. Ensure the container has access to the target workspace and required credentials.
+
+#### Direct `docker run` with inline environment variables
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$(pwd)":/workspace \
+  -v "$(pwd)/data":/app/data \
+  -e MODEL_PROVIDER=databricks \
+  -e DATABRICKS_API_BASE=https://<workspace>.cloud.databricks.com \
+  -e DATABRICKS_API_KEY=<personal-access-token> \
+  -e WORKSPACE_ROOT=/workspace \
+  -e PORT=8080 \
+  claude-code-proxy
+```
+
+Use additional `-e` flags (or `--env-file`) to pass Azure Anthropic credentials or other configuration values as needed.
 
 ### Provider-specific behaviour
 
