@@ -1,5 +1,10 @@
 # Lynkr [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vishalveerareddy123/Lynkr)
 
+[![npm version](https://img.shields.io/npm/v/lynkr.svg)](https://www.npmjs.com/package/lynkr)
+[![npm downloads](https://img.shields.io/npm/dm/lynkr.svg)](https://www.npmjs.com/package/lynkr)
+[![Homebrew Tap](https://img.shields.io/badge/homebrew-lynkr-brightgreen.svg)](https://github.com/vishalveerareddy123/homebrew-lynkr)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > It is a Cli tool which acts like a HTTP proxy that lets Claude Code CLI talk to non-Anthropic backends, manage local tools, and compose Model Context Protocol (MCP) servers with prompt caching, repo intelligence, and Git-aware automation.
 
 ## Table of Contents
@@ -445,3 +450,7 @@ A: In SQLite at `data/sessions.db` (configurable via `SESSION_DB_PATH`).
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+If you find Lynkr useful, please ⭐ the repo — it helps more people discover it.
