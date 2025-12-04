@@ -1,0 +1,56 @@
+name: Notify IndexNow on Docs Update
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+
+jobs:
+  notify-indexnow:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Notify IndexNow
+        run: |
+          echo "Notifying IndexNow about updated docs..."
+
+          # Host and key settings
+          HOST="vishalveerareddy123.github.io"
+          KEY="42642f749da6234f41b6b425c3bb07c9"
+          KEY_LOCATION="https://$HOST/Lynkr/42642f749da6234f41b6b425c3bb07c9.txt"
+
+          # URLs to notify – you can add more here as your site grows
+          URLS_JSON=$(cat <<EOF
+          {
+            "host": "$HOST",
+            "key": "$KEY",
+            "keyLocation": "$KEY_LOCATION",
+            "urlList": [
+              "https://$HOST/Lynkr/",
+              "https://$HOST/Lynkr/sitemap.xml"
+            ]
+          }
+          EOF
+          )
+
+          echo "Payload:"
+          echo "$URLS_JSON"
+
+          HTTP_CODE=$(curl -s -o /tmp/indexnow_response.txt -w "%{http_code}" \
+            -X POST "https://www.bing.com/indexnow" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$URLS_JSON")
+
+          echo "IndexNow response HTTP code: $HTTP_CODE"
+          echo "IndexNow response body:"
+          cat /tmp/indexnow_response.txt
+
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "IndexNow request failed"
+            exit 1
+          fi
