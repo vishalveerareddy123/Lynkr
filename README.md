@@ -346,6 +346,7 @@ docker run --rm -p 8080:8080 \
   -v "$(pwd)/data":/app/data \
   -e MODEL_PROVIDER=databricks \
   -e DATABRICKS_API_BASE=https://<workspace>.cloud.databricks.com \
+  -e DATABRICKS_ENDPOINT_PATH=/serving-endpoints/<endpoint-name>/invocations \
   -e DATABRICKS_API_KEY=<personal-access-token> \
   -e WORKSPACE_ROOT=/workspace \
   -e PORT=8080 \
@@ -353,6 +354,7 @@ docker run --rm -p 8080:8080 \
 ```
 
 Use additional `-e` flags (or `--env-file`) to pass Azure Anthropic credentials or other configuration values as needed.
+Replace `<workspace>` and `<endpoint-name>` with your Databricks workspace host and the Serving Endpoint you want to target (e.g. `/serving-endpoints/databricks-gpt-4o-mini/invocations`) so you can choose any available model.
 
 ### Provider-specific behaviour
 
