@@ -3,22 +3,14 @@
 
 # Lynkr – Claude Code-Compatible Proxy for Databricks 
 #### Lynkr is an open-source Claude Code-compatible proxy that allows the Claude Code CLI to run directly on Databricks. It supports MCP servers, Git workflows, repo intelligence, workspace tools, and prompt caching for LLM-powered development.
-## Keywords
+<!--
+SEO Keywords:
+Databricks, Claude Code, Anthropic, Azure Anthropic,
+LLM tools, LLM agents, Model Context Protocol, MCP,
+developer tools, proxy, git automation, AI developer tools,
+prompt caching, Node.js
+-->
 
-- Databricks
-- Claude Code
-- Anthropic
-- Azure Anthropic
-- LLM tools
-- LLM agents
-- Model Context Protocol (MCP)
-- MCP
-- developer tools
-- proxy
-- git automation
-- AI developer tools
-- prompt caching
-- Node.js
 
 ---
 
