@@ -1,15 +1,24 @@
+/* E-ink-ish font */
 @import url('https://fonts.googleapis.com/css2?family=Literata:wght@400;600;700&display=swap');
 
 body {
-  font-family: "Literata", serif;
+  font-family: "Literata", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background-color: #fbf8f3;
   color: #222;
-  margin: auto;
-  max-width: 700px;
-  padding: 30px;
+
+  /* 🔥 key part: make it flow instead of centered */
+  margin: 0;
+  padding: 1.5rem 2rem;
   line-height: 1.65;
 }
 
+/* GitHub Pages often wraps content in .markdown-body – kill its max-width */
+.markdown-body {
+  max-width: none !important;
+}
+
+/* Optional: make headings breathe a bit */
 h1, h2, h3 {
   font-weight: 600;
+  margin-top: 1.6em;
 }
