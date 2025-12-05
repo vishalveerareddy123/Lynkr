@@ -16,15 +16,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Notify IndexNow
+        env:
+          INDEXNOW_KEY: ${{ secrets.INDEX_NOW }}
         run: |
           echo "Notifying IndexNow about updated docs..."
 
-          # Host and key settings
+          # Host
           HOST="vishalveerareddy123.github.io"
-          KEY="42642f749da6234f41b6b425c3bb07c9"
-          KEY_LOCATION="https://$HOST/Lynkr/42642f749da6234f41b6b425c3bb07c9.txt"
 
-          # URLs to notify – you can add more here as your site grows
+          # Secret key pulled from GitHub
+          KEY="$INDEXNOW_KEY"
+
+          # Public key location URL
+          KEY_LOCATION="https://$HOST/Lynkr/${KEY}.txt"
+
+          # Prepare JSON payload
           URLS_JSON=$(cat <<EOF
           {
             "host": "$HOST",
