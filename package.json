@@ -1,6 +1,6 @@
 {
   "name": "lynkr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Self-hosted Claude Code proxy with Databricks and Azure Anthropic adapters, workspace tooling, and MCP integration.",
   "main": "index.js",
   "bin": {
@@ -31,7 +31,7 @@
   },
   "homepage": "https://github.com/vishalveerareddy123/Lynkr#readme",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.0",
