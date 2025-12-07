@@ -136,6 +136,15 @@ const policyGitRequireTests = process.env.POLICY_GIT_REQUIRE_TESTS === "true";
 const policyGitCommitRegex = process.env.POLICY_GIT_COMMIT_REGEX ?? null;
 const policyGitAutoStash = process.env.POLICY_GIT_AUTOSTASH === "true";
 
+const policyFileAllowedPaths = parseList(
+  process.env.POLICY_FILE_ALLOWED_PATHS ?? "",
+);
+const policyFileBlockedPaths = parseList(
+  process.env.POLICY_FILE_BLOCKED_PATHS ?? "/.env,.env,/etc/passwd,/etc/shadow",
+);
+const policySafeCommandsEnabled = process.env.POLICY_SAFE_COMMANDS_ENABLED !== "false";
+const policySafeCommandsConfig = parseJson(process.env.POLICY_SAFE_COMMANDS_CONFIG ?? "", null);
+
 const sandboxEnabled = process.env.MCP_SANDBOX_ENABLED !== "false";
 const sandboxImage = process.env.MCP_SANDBOX_IMAGE ?? null;
 const sandboxRuntime = process.env.MCP_SANDBOX_RUNTIME ?? "docker";
@@ -157,6 +166,20 @@ const sandboxDefaultTimeoutMs = Number.parseInt(
 const sandboxUser = process.env.MCP_SANDBOX_USER ?? null;
 const sandboxEntrypoint = process.env.MCP_SANDBOX_ENTRYPOINT ?? null;
 const sandboxReuseSessions = process.env.MCP_SANDBOX_REUSE_SESSION !== "false";
+const sandboxReadOnlyRoot = process.env.MCP_SANDBOX_READ_ONLY_ROOT === "true";
+const sandboxNoNewPrivileges = process.env.MCP_SANDBOX_NO_NEW_PRIVILEGES !== "false";
+const sandboxDropCapabilities = parseList(
+  process.env.MCP_SANDBOX_DROP_CAPABILITIES ?? "ALL",
+);
+const sandboxAddCapabilities = parseList(
+  process.env.MCP_SANDBOX_ADD_CAPABILITIES ?? "",
+);
+const sandboxMemoryLimit = process.env.MCP_SANDBOX_MEMORY_LIMIT ?? "512m";
+const sandboxCpuLimit = process.env.MCP_SANDBOX_CPU_LIMIT ?? "1.0";
+const sandboxPidsLimit = Number.parseInt(
+  process.env.MCP_SANDBOX_PIDS_LIMIT ?? "100",
+  10,
+);
 
 const sandboxPermissionMode =
   (process.env.MCP_SANDBOX_PERMISSION_MODE ?? "auto").toLowerCase();
@@ -250,6 +273,12 @@ const config = {
       commitMessageRegex: policyGitCommitRegex,
       autoStash: policyGitAutoStash,
     },
+    fileAccess: {
+      allowedPaths: policyFileAllowedPaths,
+      blockedPaths: policyFileBlockedPaths,
+    },
+    safeCommandsEnabled: policySafeCommandsEnabled,
+    safeCommands: policySafeCommandsConfig,
   },
   mcp: {
     sandbox: {
@@ -268,6 +297,13 @@ const config = {
       user: sandboxUser,
       entrypoint: sandboxEntrypoint,
       reuseSession: sandboxReuseSessions,
+      readOnlyRoot: sandboxReadOnlyRoot,
+      noNewPrivileges: sandboxNoNewPrivileges,
+      dropCapabilities: sandboxDropCapabilities,
+      addCapabilities: sandboxAddCapabilities,
+      memoryLimit: sandboxMemoryLimit,
+      cpuLimit: sandboxCpuLimit,
+      pidsLimit: Number.isNaN(sandboxPidsLimit) ? 100 : sandboxPidsLimit,
     },
     permissions: {
       mode: ["auto", "require", "deny"].includes(sandboxPermissionMode)

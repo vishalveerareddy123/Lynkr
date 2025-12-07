@@ -61,6 +61,39 @@ function buildRuntimeArgs({ session, command, args, cwd, env }) {
   const sandboxConfig = config.mcp?.sandbox ?? {};
   const runtimeArgs = ["run", "--rm"];
 
+  // Security hardening options
+  if (sandboxConfig.readOnlyRoot) {
+    runtimeArgs.push("--read-only");
+  }
+
+  if (sandboxConfig.noNewPrivileges !== false) {
+    runtimeArgs.push("--security-opt", "no-new-privileges");
+  }
+
+  // Resource limits
+  if (sandboxConfig.memoryLimit) {
+    runtimeArgs.push("--memory", sandboxConfig.memoryLimit);
+  }
+
+  if (sandboxConfig.cpuLimit) {
+    runtimeArgs.push("--cpus", String(sandboxConfig.cpuLimit));
+  }
+
+  if (sandboxConfig.pidsLimit && !isNaN(sandboxConfig.pidsLimit)) {
+    runtimeArgs.push("--pids-limit", String(sandboxConfig.pidsLimit));
+  }
+
+  // Capability management
+  const dropCaps = sandboxConfig.dropCapabilities ?? [];
+  for (const cap of dropCaps) {
+    runtimeArgs.push("--cap-drop", cap);
+  }
+
+  const addCaps = sandboxConfig.addCapabilities ?? [];
+  for (const cap of addCaps) {
+    runtimeArgs.push("--cap-add", cap);
+  }
+
   if (!sandboxConfig.allowNetworking) {
     runtimeArgs.push("--network", "none");
   } else if (sandboxConfig.networkMode && sandboxConfig.networkMode !== "none") {

@@ -11,11 +11,20 @@ if (!fs.existsSync(directory)) {
   fs.mkdirSync(directory, { recursive: true });
 }
 
-const db = new Database(dbPath);
+const db = new Database(dbPath, {
+  verbose: process.env.DEBUG_SQL ? console.log : null,
+  fileMustExist: false
+});
 
-db.pragma("journal_mode = WAL");
-db.pragma("synchronous = NORMAL");
-db.pragma("foreign_keys = ON");
+// Optimize SQLite settings for performance
+db.pragma("journal_mode = WAL");              // Write-Ahead Logging for better concurrency
+db.pragma("synchronous = NORMAL");            // Faster writes (still safe with WAL)
+db.pragma("foreign_keys = ON");               // Enforce foreign key constraints
+db.pragma("cache_size = -64000");             // 64MB cache (negative = KB)
+db.pragma("temp_store = MEMORY");             // Store temp tables in memory
+db.pragma("mmap_size = 30000000000");         // 30GB memory-mapped I/O
+db.pragma("page_size = 4096");                // Optimal page size
+db.pragma("busy_timeout = 5000");             // Wait 5s if database is locked
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
@@ -40,6 +49,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_session_history_session_id_timestamp
     ON session_history(session_id, timestamp);
 
+  CREATE INDEX IF NOT EXISTS idx_session_history_role
+    ON session_history(role);
+
+  CREATE INDEX IF NOT EXISTS idx_sessions_created_at
+    ON sessions(created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
+    ON sessions(updated_at);
+
   CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
     size_bytes INTEGER NOT NULL,
@@ -47,6 +65,12 @@ db.exec(`
     language TEXT,
     summary TEXT
   );
+
+  CREATE INDEX IF NOT EXISTS idx_files_language
+    ON files(language);
+
+  CREATE INDEX IF NOT EXISTS idx_files_mtime
+    ON files(mtime_ms DESC);
 
   CREATE TABLE IF NOT EXISTS symbols (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +82,15 @@ db.exec(`
     metadata TEXT,
     FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
   );
+
+  CREATE INDEX IF NOT EXISTS idx_symbols_file_path
+    ON symbols(file_path);
+
+  CREATE INDEX IF NOT EXISTS idx_symbols_name
+    ON symbols(name);
+
+  CREATE INDEX IF NOT EXISTS idx_symbols_kind
+    ON symbols(kind);
 
   CREATE TABLE IF NOT EXISTS framework_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

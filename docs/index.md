@@ -1,6 +1,8 @@
 
 <link rel="stylesheet" href="style.css">
 
+<script defer data-url="https://devhunt.org/tool/lynkr" src="https://cdn.jsdelivr.net/gh/sidiDev/devhunt-banner/indexV0.js"></script>
+
 
 # Lynkr – Claude Code-Compatible Proxy for Databricks 
 #### Lynkr is an open-source Claude Code-compatible proxy that allows the Claude Code CLI to run directly with Databricks LLMs. It supports MCP servers, Git workflows, repo intelligence, workspace tools, and prompt caching for LLM-powered development.
@@ -359,4 +361,3 @@ curl http://localhost:8080/v1/messages \
 If you use Databricks or Azure Anthropic and want rich Claude Code workflows, Lynkr gives you the control and extensibility you need.
 
 Feel free to open issues, contribute tools, or integrate with MCP servers!
-

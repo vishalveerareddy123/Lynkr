@@ -1,4 +1,7 @@
 const crypto = require("crypto");
+const Database = require("better-sqlite3");
+const path = require("path");
+const fs = require("fs");
 const config = require("../config");
 const logger = require("../logger");
 
@@ -33,10 +36,97 @@ class PromptCache {
     this.maxEntries =
       Number.isInteger(options.maxEntries) && options.maxEntries > 0
         ? options.maxEntries
-        : 64;
+        : 1000; // Increased from 64
     this.ttlMs =
       Number.isInteger(options.ttlMs) && options.ttlMs > 0 ? options.ttlMs : 300000;
-    this.store = new Map();
+
+    // Initialize persistent cache database
+    if (this.enabled) {
+      this.initDatabase();
+    }
+  }
+
+  initDatabase() {
+    try {
+      const cacheDir = path.join(process.cwd(), 'data');
+      if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+      }
+
+      const dbPath = path.join(cacheDir, 'prompt-cache.db');
+      this.db = new Database(dbPath);
+
+      // Optimize for cache workload
+      this.db.pragma("journal_mode = WAL");
+      this.db.pragma("synchronous = NORMAL");
+      this.db.pragma("cache_size = -32000"); // 32MB cache
+      this.db.pragma("temp_store = MEMORY");
+
+      // Create cache table
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS prompt_cache (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          hit_count INTEGER DEFAULT 0,
+          last_accessed INTEGER NOT NULL,
+          response_size INTEGER DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cache_expires ON prompt_cache(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_cache_accessed ON prompt_cache(last_accessed);
+        CREATE INDEX IF NOT EXISTS idx_cache_hits ON prompt_cache(hit_count DESC);
+      `);
+
+      // Prepare statements for performance
+      this.getStmt = this.db.prepare(`
+        SELECT value, hit_count
+        FROM prompt_cache
+        WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)
+      `);
+
+      this.setStmt = this.db.prepare(`
+        INSERT INTO prompt_cache (key, value, created_at, expires_at, last_accessed, response_size)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          hit_count = hit_count + 1,
+          last_accessed = excluded.last_accessed
+      `);
+
+      this.updateAccessStmt = this.db.prepare(`
+        UPDATE prompt_cache
+        SET hit_count = hit_count + 1, last_accessed = ?
+        WHERE key = ?
+      `);
+
+      this.deleteExpiredStmt = this.db.prepare(`
+        DELETE FROM prompt_cache
+        WHERE expires_at IS NOT NULL AND expires_at <= ?
+      `);
+
+      this.evictOldestStmt = this.db.prepare(`
+        DELETE FROM prompt_cache
+        WHERE key IN (
+          SELECT key FROM prompt_cache
+          ORDER BY last_accessed ASC
+          LIMIT ?
+        )
+      `);
+
+      this.countStmt = this.db.prepare(`
+        SELECT COUNT(*) as count FROM prompt_cache
+      `);
+
+      // Clean expired entries on startup
+      this.pruneExpired();
+
+      logger.info({ dbPath }, "Prompt cache initialized with persistent storage");
+    } catch (error) {
+      logger.error({ err: error }, "Failed to initialize prompt cache database");
+      this.enabled = false;
+    }
   }
 
   isEnabled() {
@@ -71,18 +161,21 @@ class PromptCache {
   }
 
   pruneExpired() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.db) return;
     if (this.ttlMs <= 0) return;
-    const now = Date.now();
-    for (const [key, entry] of this.store) {
-      if (entry.expiresAt && entry.expiresAt <= now) {
-        this.store.delete(key);
+    try {
+      const now = Date.now();
+      const result = this.deleteExpiredStmt.run(now);
+      if (result.changes > 0) {
+        logger.debug({ deleted: result.changes }, "Pruned expired cache entries");
       }
+    } catch (error) {
+      logger.warn({ err: error }, "Failed to prune expired cache entries");
     }
   }
 
   lookup(payloadOrKey) {
-    if (!this.enabled) {
+    if (!this.enabled || !this.db) {
       return { key: null, entry: null };
     }
     const key =
@@ -91,27 +184,48 @@ class PromptCache {
       return { key: null, entry: null };
     }
 
-    this.pruneExpired();
-    const entry = this.store.get(key);
-    if (!entry) {
-      return { key, entry: null };
-    }
-    if (entry.expiresAt && entry.expiresAt <= Date.now()) {
-      this.store.delete(key);
-      return { key, entry: null };
-    }
+    try {
+      const now = Date.now();
+      const row = this.getStmt.get(key, now);
 
-    this.store.delete(key);
-    this.store.set(key, entry);
-    return { key, entry };
+      if (!row) {
+        return { key, entry: null };
+      }
+
+      // Update access time and hit count asynchronously
+      setImmediate(() => {
+        try {
+          this.updateAccessStmt.run(now, key);
+        } catch (error) {
+          logger.debug({ err: error }, "Failed to update cache access time");
+        }
+      });
+
+      return {
+        key,
+        entry: {
+          value: JSON.parse(row.value),
+          hitCount: row.hit_count
+        }
+      };
+    } catch (error) {
+      logger.warn({ err: error, key }, "Failed to lookup cache entry");
+      return { key, entry: null };
+    }
   }
 
   fetch(payload) {
     const { key, entry } = this.lookup(payload);
     if (!entry) return null;
+
+    logger.debug({
+      key,
+      hitCount: entry.hitCount
+    }, "Cache hit");
+
     return {
       key,
-      response: cloneValue(entry.value),
+      response: entry.value, // Already cloned from JSON.parse
     };
   }
 
@@ -133,51 +247,101 @@ class PromptCache {
   }
 
   storeResponse(payloadOrKey, response) {
-    if (!this.enabled) return null;
+    if (!this.enabled || !this.db) return null;
     if (!this.shouldCacheResponse(response)) return null;
     const key =
       typeof payloadOrKey === "string" ? payloadOrKey : this.buildKey(payloadOrKey);
     if (!key) return null;
 
-    this.pruneExpired();
-    const entry = {
-      value: cloneValue(response),
-      createdAt: Date.now(),
-      expiresAt: this.ttlMs > 0 ? Date.now() + this.ttlMs : null,
-    };
+    try {
+      const now = Date.now();
+      const expiresAt = this.ttlMs > 0 ? now + this.ttlMs : null;
+      const valueStr = JSON.stringify(response);
+      const responseSize = valueStr.length;
 
-    if (this.store.has(key)) {
-      this.store.delete(key);
+      this.setStmt.run(key, valueStr, now, expiresAt, now, responseSize);
+
+      // Check if we need to evict old entries
+      const count = this.countStmt.get().count;
+      if (count > this.maxEntries) {
+        const toEvict = count - this.maxEntries + 10; // Evict 10 extra to avoid frequent evictions
+        this.evictOldestStmt.run(toEvict);
+        logger.debug({ evicted: toEvict }, "Evicted old cache entries");
+      }
+
+      logger.debug(
+        {
+          cacheKey: key,
+          size: count,
+          responseSize,
+        },
+        "Stored response in prompt cache",
+      );
+
+      return key;
+    } catch (error) {
+      logger.warn({ err: error, key }, "Failed to store cache entry");
+      return null;
     }
-
-    this.store.set(key, entry);
-
-    while (this.store.size > this.maxEntries) {
-      const oldestKey = this.store.keys().next().value;
-      this.store.delete(oldestKey);
-    }
-
-    logger.debug(
-      {
-        cacheKey: key,
-        size: this.store.size,
-      },
-      "Stored response in prompt cache",
-    );
-
-    return key;
   }
 
   stats() {
-    return {
-      enabled: this.enabled,
-      size: this.store.size,
-      ttlMs: this.ttlMs,
-      maxEntries: this.maxEntries,
-    };
+    if (!this.enabled || !this.db) {
+      return {
+        enabled: this.enabled,
+        size: 0,
+        ttlMs: this.ttlMs,
+        maxEntries: this.maxEntries,
+      };
+    }
+
+    try {
+      const count = this.countStmt.get().count;
+      const stats = this.db.prepare(`
+        SELECT
+          SUM(response_size) as total_size,
+          AVG(hit_count) as avg_hits,
+          MAX(hit_count) as max_hits
+        FROM prompt_cache
+      `).get();
+
+      return {
+        enabled: this.enabled,
+        size: count,
+        ttlMs: this.ttlMs,
+        maxEntries: this.maxEntries,
+        totalSize: stats.total_size || 0,
+        avgHits: Math.round(stats.avg_hits || 0),
+        maxHits: stats.max_hits || 0,
+      };
+    } catch (error) {
+      logger.warn({ err: error }, "Failed to get cache stats");
+      return {
+        enabled: this.enabled,
+        size: 0,
+        ttlMs: this.ttlMs,
+        maxEntries: this.maxEntries,
+      };
+    }
+  }
+
+  // Cleanup method
+  close() {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch (error) {
+        logger.warn({ err: error }, "Failed to close cache database");
+      }
+    }
   }
 }
 
 const promptCache = new PromptCache(config.promptCache ?? {});
+
+// Cleanup on process exit
+process.on('exit', () => {
+  promptCache.close();
+});
 
 module.exports = promptCache;

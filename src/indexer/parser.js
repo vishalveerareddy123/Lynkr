@@ -1,26 +1,68 @@
-const Parser = require("tree-sitter");
-const JavaScript = require("tree-sitter-javascript");
-const TypeScript = require("tree-sitter-typescript").typescript;
-const TSX = require("tree-sitter-typescript").tsx;
-const Python = require("tree-sitter-python");
 const logger = require("../logger");
+
+// Lazy load heavy dependencies
+let Parser = null;
+let JavaScript = null;
+let TypeScript = null;
+let TSX = null;
+let Python = null;
+
+function getTreeSitterParser() {
+  if (!Parser) {
+    Parser = require("tree-sitter");
+  }
+  return Parser;
+}
+
+function getLanguageModule(language) {
+  switch (language) {
+    case "javascript":
+    case "javascript-react":
+      if (!JavaScript) {
+        JavaScript = require("tree-sitter-javascript");
+      }
+      return JavaScript;
+    case "typescript":
+      if (!TypeScript) {
+        const ts = require("tree-sitter-typescript");
+        TypeScript = ts.typescript;
+      }
+      return TypeScript;
+    case "typescript-react":
+      if (!TSX) {
+        const ts = require("tree-sitter-typescript");
+        TSX = ts.tsx;
+      }
+      return TSX;
+    case "python":
+      if (!Python) {
+        Python = require("tree-sitter-python");
+      }
+      return Python;
+    default:
+      return null;
+  }
+}
 
 const parserCache = {};
 
 const LANGUAGE_MAP = {
-  javascript: { language: JavaScript, type: "javascript" },
-  "javascript-react": { language: JavaScript, type: "javascript" },
-  typescript: { language: TypeScript, type: "typescript" },
-  "typescript-react": { language: TSX, type: "typescript" },
-  python: { language: Python, type: "python" },
+  javascript: { getLanguage: () => getLanguageModule("javascript"), type: "javascript" },
+  "javascript-react": { getLanguage: () => getLanguageModule("javascript-react"), type: "javascript" },
+  typescript: { getLanguage: () => getLanguageModule("typescript"), type: "typescript" },
+  "typescript-react": { getLanguage: () => getLanguageModule("typescript-react"), type: "typescript" },
+  python: { getLanguage: () => getLanguageModule("python"), type: "python" },
 };
 
 function getParser(languageKey) {
   const entry = LANGUAGE_MAP[languageKey];
   if (!entry) return null;
   if (!parserCache[languageKey]) {
-    const parser = new Parser();
-    parser.setLanguage(entry.language);
+    const ParserClass = getTreeSitterParser();
+    const parser = new ParserClass();
+    const language = entry.getLanguage();
+    if (!language) return null;
+    parser.setLanguage(language);
     parserCache[languageKey] = parser;
   }
   return parserCache[languageKey];

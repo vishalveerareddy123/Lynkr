@@ -1,0 +1,144 @@
+const logger = require("../../logger");
+const { ServiceUnavailableError } = require("./error-handling");
+
+/**
+ * Load shedding middleware
+ *
+ * Features:
+ * - Detect system overload (CPU, memory, queue depth)
+ * - Reject requests with 503 when overloaded
+ * - Protect system from cascading failures
+ * - Minimal performance overhead
+ */
+
+class LoadShedder {
+  constructor(options = {}) {
+    // Thresholds
+    this.memoryThreshold = options.memoryThreshold || 0.85; // 85%
+    this.heapThreshold = options.heapThreshold || 0.90; // 90%
+    this.activeRequestsThreshold = options.activeRequestsThreshold || 1000;
+
+    // State
+    this.activeRequests = 0;
+    this.totalShed = 0;
+    this.lastCheck = Date.now();
+    this.checkInterval = options.checkInterval || 1000; // Check every second
+    this.cachedOverloadState = false;
+  }
+
+  /**
+   * Check if system is overloaded
+   */
+  isOverloaded() {
+    const now = Date.now();
+
+    // Use cached state if checked recently (performance optimization)
+    if (now - this.lastCheck < this.checkInterval) {
+      return this.cachedOverloadState;
+    }
+
+    this.lastCheck = now;
+
+    // Check memory usage
+    const memUsage = process.memoryUsage();
+    const heapUsedPercent = memUsage.heapUsed / memUsage.heapTotal;
+
+    if (heapUsedPercent > this.heapThreshold) {
+      logger.warn(
+        {
+          heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
+          threshold: (this.heapThreshold * 100).toFixed(2),
+        },
+        "Load shedding: Heap usage exceeded threshold"
+      );
+      this.cachedOverloadState = true;
+      return true;
+    }
+
+    // Check active requests
+    if (this.activeRequests > this.activeRequestsThreshold) {
+      logger.warn(
+        {
+          activeRequests: this.activeRequests,
+          threshold: this.activeRequestsThreshold,
+        },
+        "Load shedding: Active requests exceeded threshold"
+      );
+      this.cachedOverloadState = true;
+      return true;
+    }
+
+    this.cachedOverloadState = false;
+    return false;
+  }
+
+  /**
+   * Get current metrics
+   */
+  getMetrics() {
+    const memUsage = process.memoryUsage();
+    return {
+      activeRequests: this.activeRequests,
+      totalShed: this.totalShed,
+      heapUsedPercent: ((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(2),
+      thresholds: {
+        heapThreshold: (this.heapThreshold * 100).toFixed(2),
+        activeRequestsThreshold: this.activeRequestsThreshold,
+      },
+    };
+  }
+}
+
+// Singleton instance
+let instance = null;
+
+function getLoadShedder(options) {
+  if (!instance) {
+    instance = new LoadShedder(options);
+  }
+  return instance;
+}
+
+/**
+ * Load shedding middleware
+ */
+function loadSheddingMiddleware(req, res, next) {
+  const shedder = getLoadShedder();
+
+  // Check if overloaded
+  if (shedder.isOverloaded()) {
+    shedder.totalShed++;
+
+    // Return 503 Service Unavailable
+    const error = new ServiceUnavailableError(
+      "Service temporarily overloaded. Please retry after a few seconds."
+    );
+
+    // Add Retry-After header (suggest 5 seconds)
+    res.setHeader("Retry-After", "5");
+
+    return next(error);
+  }
+
+  // Track active request
+  shedder.activeRequests++;
+
+  // Decrement on response finish
+  res.on("finish", () => {
+    shedder.activeRequests--;
+  });
+
+  res.on("close", () => {
+    if (shedder.activeRequests > 0) {
+      shedder.activeRequests--;
+    }
+  });
+
+  next();
+}
+
+module.exports = {
+  LoadShedder,
+  getLoadShedder,
+  loadSheddingMiddleware,
+};

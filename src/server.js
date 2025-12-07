@@ -1,8 +1,18 @@
 const express = require("express");
+const compression = require("compression");
 const config = require("./config");
 const loggingMiddleware = require("./api/middleware/logging");
 const router = require("./api/router");
 const { sessionMiddleware } = require("./api/middleware/session");
+const { budgetMiddleware } = require("./api/middleware/budget");
+const { metricsMiddleware } = require("./api/middleware/metrics");
+const { requestLoggingMiddleware } = require("./api/middleware/request-logging");
+const { errorHandlingMiddleware, notFoundHandler } = require("./api/middleware/error-handling");
+const { loadSheddingMiddleware } = require("./api/middleware/load-shedding");
+const { livenessCheck, readinessCheck } = require("./api/health");
+const { getMetricsCollector } = require("./observability/metrics");
+const { getShutdownManager } = require("./server/shutdown");
+const { getCircuitBreakerRegistry } = require("./clients/circuit-breaker");
 const metrics = require("./metrics");
 const logger = require("./logger");
 const { initialiseMcp } = require("./mcp");
@@ -32,39 +42,85 @@ registerMcpTools();
 function createApp() {
   const app = express();
 
+  // Load shedding (protect against overload)
+  app.use(loadSheddingMiddleware);
+
+  // Request logging (add request IDs, structured logs)
+  app.use(requestLoggingMiddleware);
+
+  // Metrics collection
+  app.use(metricsMiddleware);
+
+  // Enable compression for all responses (gzip/deflate)
+  app.use(compression({
+    level: 6, // Balanced compression level
+    threshold: 1024, // Only compress responses > 1KB
+    filter: (req, res) => {
+      // Don't compress event streams
+      if (res.getHeader('Content-Type') === 'text/event-stream') {
+        return false;
+      }
+      return compression.filter(req, res);
+    }
+  }));
+
   app.use(express.json({ limit: config.server.jsonLimit }));
   app.use(sessionMiddleware);
   app.use(loggingMiddleware);
 
+  // Budget and rate limiting (can be disabled via config)
+  if (config.budget?.enabled !== false) {
+    app.use('/v1/messages', budgetMiddleware);
+  }
+
+  // Health check endpoints
+  app.get("/health/live", livenessCheck);
+  app.get("/health/ready", readinessCheck);
+
+  // Metrics endpoints
   app.get("/metrics", (req, res) => {
     res.json(metrics.snapshot());
   });
 
+  app.get("/metrics/observability", (req, res) => {
+    const metricsCollector = getMetricsCollector();
+    res.json(metricsCollector.getMetrics());
+  });
+
+  app.get("/metrics/prometheus", (req, res) => {
+    const metricsCollector = getMetricsCollector();
+    res.set("Content-Type", "text/plain");
+    res.send(metricsCollector.toPrometheus());
+  });
+
+  app.get("/metrics/circuit-breakers", (req, res) => {
+    const registry = getCircuitBreakerRegistry();
+    res.json(registry.getAll());
+  });
+
   app.use(router);
 
-  // Basic error handler to surface issues cleanly.
-  app.use((err, req, res, next) => {
-    logger.error({ err }, "Request error");
-    if (res.headersSent) {
-      return next(err);
-    }
-    const status = err.status ?? 500;
-    metrics.recordResponse(status);
-    res.status(status).json({
-      error: err.code ?? "internal_error",
-      message: err.message ?? "Unexpected error",
-    });
-  });
+  // 404 handler (must be after all routes)
+  app.use(notFoundHandler);
+
+  // Error handler (must be last)
+  app.use(errorHandlingMiddleware);
 
   return app;
 }
 
 function start() {
   const app = createApp();
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`Claude→Databricks proxy listening on http://localhost:${config.port}`);
   });
-  return app;
+
+  // Setup graceful shutdown
+  const shutdownManager = getShutdownManager();
+  shutdownManager.registerServer(server);
+  shutdownManager.setupSignalHandlers();
+
+  return server;
 }
 
 module.exports = {

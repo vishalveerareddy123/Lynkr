@@ -505,6 +505,25 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Regex pattern cache for performance
+const regexCache = new Map();
+const MAX_REGEX_CACHE_SIZE = 10000;
+
+function getCachedRegex(symbolName) {
+  if (!regexCache.has(symbolName)) {
+    const escaped = escapeRegex(symbolName);
+    const regex = new RegExp(`\\b${escaped}\\b`, "g");
+    regexCache.set(symbolName, regex);
+
+    // Prevent unbounded growth
+    if (regexCache.size > MAX_REGEX_CACHE_SIZE) {
+      const firstKey = regexCache.keys().next().value;
+      regexCache.delete(firstKey);
+    }
+  }
+  return regexCache.get(symbolName);
+}
+
 function safeParseJson(value, fallback = null) {
   if (value === null || value === undefined) return fallback;
   if (typeof value !== "string") return fallback;
@@ -1224,7 +1243,7 @@ async function rebuildWorkspaceIndex(options = {}) {
       if (typeof content !== "string" || content.length === 0) return;
       const lines = content.split(/\r?\n/);
       defsByName.forEach((defs, symbolName) => {
-        const regex = new RegExp(`\\b${escapeRegex(symbolName)}\\b`, "g");
+        const regex = getCachedRegex(symbolName);
         lines.some((line, lineIndex) => {
           if (referenceCount >= FALLBACK_REFERENCE_SAMPLE_LIMIT) {
             return true;

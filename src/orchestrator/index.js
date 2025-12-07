@@ -954,6 +954,8 @@ async function runAgentLoop({
 
       cleanPayload.messages.push(assistantToolMessage);
 
+      // Evaluate policy for all tools first (must be sequential for rate limiting)
+      const toolCallsWithPolicy = [];
       for (const call of toolCalls) {
         const callId =
           call.id ??
@@ -967,8 +969,13 @@ async function runAgentLoop({
         );
         const decision = policy.evaluateToolCall({
           call,
-          toolCallsExecuted,
+          toolCallsExecuted: toolCallsExecuted + toolCallsWithPolicy.length,
         });
+        toolCallsWithPolicy.push({ call, decision });
+      }
+
+      // Now process results (still sequential for message ordering)
+      for (const { call, decision } of toolCallsWithPolicy) {
 
         if (!decision.allowed) {
           policy.logPolicyDecision(decision, {

@@ -1,5 +1,8 @@
 const config = require("../config");
 const logger = require("../logger");
+const path = require("path");
+const { workspaceRoot } = require("../workspace");
+const { getSafeCommandDSL } = require("./safe-commands");
 
 const SHELL_BLOCKLIST_PATTERNS = [
   new RegExp("rm\\s+-rf\\s+/(?:\\s|$)", "i"),
@@ -65,12 +68,37 @@ function evaluateShellCall(args) {
       ? args.args.join(" ")
       : "";
   if (!command) return { allowed: true };
+
+  // Legacy blocklist check (backwards compatible)
   if (matchesAny(SHELL_BLOCKLIST_PATTERNS, command)) {
     return {
       allowed: false,
       reason: "Command matched restricted pattern",
     };
   }
+
+  // Safe Command DSL evaluation (if enabled)
+  const safeModEnabled = config.policy?.safeCommandsEnabled !== false;
+  if (safeModEnabled) {
+    const dsl = getSafeCommandDSL();
+    const decision = dsl.evaluate(command);
+    if (!decision.allowed) {
+      logger.warn(
+        {
+          command: decision.command,
+          reason: decision.reason,
+          severity: decision.severity,
+        },
+        "Safe Command DSL blocked command",
+      );
+      return {
+        allowed: false,
+        reason: decision.reason,
+        severity: decision.severity,
+      };
+    }
+  }
+
   return { allowed: true };
 }
 
@@ -91,6 +119,92 @@ function evaluatePythonCall(args) {
     };
   }
   return { allowed: true };
+}
+
+function evaluateFileOperation(args) {
+  const filePolicy = config.policy.fileAccess ?? {};
+  const allowedPaths = filePolicy.allowedPaths ?? [];
+  const blockedPaths = filePolicy.blockedPaths ?? [];
+
+  // Extract file path from various argument names
+  const filePath =
+    args.path ??
+    args.file ??
+    args.file_path ??
+    args.filePath ??
+    args.filename ??
+    args.name;
+
+  if (!filePath || typeof filePath !== "string") {
+    return { allowed: true }; // No path to validate
+  }
+
+  // Resolve to absolute path for consistent checking
+  let absolutePath;
+  try {
+    if (path.isAbsolute(filePath)) {
+      absolutePath = path.normalize(filePath);
+    } else {
+      absolutePath = path.resolve(workspaceRoot, filePath);
+    }
+  } catch (err) {
+    return {
+      allowed: false,
+      reason: "Invalid file path",
+    };
+  }
+
+  // Check blocklist first (takes precedence)
+  for (const blockedPattern of blockedPaths) {
+    if (matchesPathPattern(absolutePath, filePath, blockedPattern)) {
+      return {
+        allowed: false,
+        reason: `File path "${filePath}" matches blocked pattern "${blockedPattern}"`,
+      };
+    }
+  }
+
+  // If allowlist is configured, path must match one of the patterns
+  if (allowedPaths.length > 0) {
+    let matched = false;
+    for (const allowedPattern of allowedPaths) {
+      if (matchesPathPattern(absolutePath, filePath, allowedPattern)) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      return {
+        allowed: false,
+        reason: `File path "${filePath}" does not match any allowed patterns`,
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+function matchesPathPattern(absolutePath, relativePath, pattern) {
+  if (!pattern || typeof pattern !== "string") return false;
+
+  // Check if pattern is a glob-like pattern
+  if (pattern.includes("*") || pattern.includes("?")) {
+    // Simple glob matching - convert to regex
+    const regexPattern = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&") // Escape regex special chars
+      .replace(/\*/g, ".*") // * matches any sequence
+      .replace(/\?/g, "."); // ? matches single char
+    const regex = new RegExp(`^${regexPattern}$`, "i");
+    return regex.test(absolutePath) || regex.test(relativePath);
+  }
+
+  // Exact match or substring match
+  return (
+    absolutePath.includes(pattern) ||
+    relativePath.includes(pattern) ||
+    absolutePath.toLowerCase() === pattern.toLowerCase() ||
+    relativePath.toLowerCase() === pattern.toLowerCase()
+  );
 }
 
 function evaluateToolCall({ call, toolCallsExecuted }) {
@@ -173,6 +287,23 @@ function evaluateToolCall({ call, toolCallsExecuted }) {
         reason: decision.reason,
         status: 403,
         code: "unsafe_python_code",
+      };
+    }
+  }
+
+  // Check file operation paths
+  if (
+    toolName === "fs_read" ||
+    toolName === "fs_write" ||
+    toolName === "edit_patch"
+  ) {
+    const decision = evaluateFileOperation(args);
+    if (!decision.allowed) {
+      return {
+        allowed: false,
+        reason: decision.reason,
+        status: 403,
+        code: "file_access_denied",
       };
     }
   }
