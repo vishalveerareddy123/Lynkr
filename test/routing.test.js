@@ -78,7 +78,9 @@ describe("Routing Logic", () => {
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
       process.env.OLLAMA_MAX_TOOLS_FOR_ROUTING = "3";
-      process.env.OLLAMA_FALLBACK_PROVIDER = "databricks";
+      process.env.OPENROUTER_MAX_TOOLS_FOR_ROUTING = "3"; // Set same as ollama to skip openrouter tier
+      process.env.FALLBACK_PROVIDER = "databricks";
+      process.env.FALLBACK_ENABLED = "true"; // Ensure fallback is enabled
       process.env.DATABRICKS_API_KEY = "test-key";
       process.env.DATABRICKS_API_BASE = "http://test.com";
 
@@ -105,6 +107,7 @@ describe("Routing Logic", () => {
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_MODEL = "llama3:latest"; // Non-tool-capable model
       process.env.OLLAMA_FALLBACK_PROVIDER = "databricks";
+      process.env.FALLBACK_ENABLED = "true"; // Ensure fallback is enabled
       process.env.DATABRICKS_API_KEY = "test-key";
       process.env.DATABRICKS_API_BASE = "http://test.com";
 
@@ -153,6 +156,9 @@ describe("Routing Logic", () => {
       process.env.MODEL_PROVIDER = "ollama";
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
+      // Override .env file which sets FALLBACK_ENABLED=false
+      // Test default behavior when not set to "false"
+      process.env.FALLBACK_ENABLED = "true";
 
       config = require("../src/config");
       routing = require("../src/clients/routing");
@@ -164,7 +170,7 @@ describe("Routing Logic", () => {
       process.env.MODEL_PROVIDER = "ollama";
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
-      process.env.OLLAMA_FALLBACK_ENABLED = "false";
+      process.env.FALLBACK_ENABLED = "false";
 
       config = require("../src/config");
       routing = require("../src/clients/routing");
@@ -191,7 +197,7 @@ describe("Routing Logic", () => {
       process.env.MODEL_PROVIDER = "ollama";
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
-      process.env.OLLAMA_FALLBACK_PROVIDER = "azure-anthropic";
+      process.env.FALLBACK_PROVIDER = "azure-anthropic";
       process.env.AZURE_ANTHROPIC_ENDPOINT = "http://test.com";
       process.env.AZURE_ANTHROPIC_API_KEY = "test-key";
 

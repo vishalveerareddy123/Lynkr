@@ -42,33 +42,36 @@ describe("Hybrid Routing Integration Tests", () => {
       assert.strictEqual(config.ollama.endpoint, "http://localhost:11434");
     });
 
-    it("should reject invalid OLLAMA_FALLBACK_PROVIDER", () => {
+    it("should reject invalid FALLBACK_PROVIDER", () => {
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_ENDPOINT = "http://localhost:11434";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
-      process.env.OLLAMA_FALLBACK_PROVIDER = "invalid-provider";
+      process.env.FALLBACK_ENABLED = "true";
+      process.env.FALLBACK_PROVIDER = "invalid-provider";
 
       assert.throws(() => {
         require("../src/config");
-      }, /OLLAMA_FALLBACK_PROVIDER must be one of/);
+      }, /FALLBACK_PROVIDER must be one of/);
     });
 
     it("should reject circular fallback (ollama -> ollama)", () => {
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_ENDPOINT = "http://localhost:11434";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
-      process.env.OLLAMA_FALLBACK_PROVIDER = "ollama";
+      process.env.FALLBACK_ENABLED = "true";
+      process.env.FALLBACK_PROVIDER = "ollama";
 
       assert.throws(() => {
         require("../src/config");
-      }, /OLLAMA_FALLBACK_PROVIDER cannot be 'ollama'/);
+      }, /FALLBACK_PROVIDER cannot be 'ollama'/);
     });
 
     it("should reject PREFER_OLLAMA with databricks fallback but no databricks credentials", () => {
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_ENDPOINT = "http://localhost:11434";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
-      process.env.OLLAMA_FALLBACK_PROVIDER = "databricks";
+      process.env.FALLBACK_ENABLED = "true";
+      process.env.FALLBACK_PROVIDER = "databricks";
       delete process.env.DATABRICKS_API_KEY;
       delete process.env.DATABRICKS_API_BASE;
 
@@ -83,16 +86,18 @@ describe("Hybrid Routing Integration Tests", () => {
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_ENDPOINT = "http://localhost:11434";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
-      process.env.OLLAMA_FALLBACK_PROVIDER = "databricks";
+      process.env.FALLBACK_ENABLED = "true";
+      process.env.FALLBACK_PROVIDER = "databricks";
+      process.env.OLLAMA_MAX_TOOLS_FOR_ROUTING = "3"; // Override .env which sets it to 2
       process.env.DATABRICKS_API_KEY = "test-key";
       process.env.DATABRICKS_API_BASE = "http://test.com";
 
       const config = require("../src/config");
 
       assert.strictEqual(config.modelProvider.preferOllama, true);
-      assert.strictEqual(config.modelProvider.ollamaFallbackEnabled, true);
+      assert.strictEqual(config.modelProvider.fallbackEnabled, true);
       assert.strictEqual(config.modelProvider.ollamaMaxToolsForRouting, 3);
-      assert.strictEqual(config.modelProvider.ollamaFallbackProvider, "databricks");
+      assert.strictEqual(config.modelProvider.fallbackProvider, "databricks");
     });
   });
 
