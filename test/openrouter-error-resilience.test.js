@@ -7,6 +7,11 @@ describe("OpenRouter Error Resilience", () => {
   beforeEach(() => {
     originalEnv = { ...process.env };
 
+    // Set MODEL_PROVIDER to avoid validation errors
+    process.env.MODEL_PROVIDER = "databricks";
+    process.env.DATABRICKS_API_KEY = "test-key";
+    process.env.DATABRICKS_API_BASE = "http://test.com";
+
     // Clear module cache
     delete require.cache[require.resolve("../src/config")];
     delete require.cache[require.resolve("../src/clients/openrouter-utils")];

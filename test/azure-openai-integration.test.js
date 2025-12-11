@@ -12,6 +12,11 @@ describe("Azure OpenAI Integration Tests", () => {
 
     // Store original config
     originalConfig = { ...process.env };
+
+    // Set default provider to avoid validation errors
+    process.env.MODEL_PROVIDER = "databricks";
+    process.env.DATABRICKS_API_KEY = "test-key";
+    process.env.DATABRICKS_API_BASE = "http://test.com";
   });
 
   afterEach(() => {

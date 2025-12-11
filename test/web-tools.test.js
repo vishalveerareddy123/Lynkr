@@ -3,6 +3,9 @@ const assert = require("node:assert");
 const http = require("http");
 
 // Mock configuration
+process.env.MODEL_PROVIDER = "databricks"; // Override any .env settings
+process.env.DATABRICKS_API_KEY = "test-key";
+process.env.DATABRICKS_API_BASE = "http://test.com";
 process.env.WEB_SEARCH_ENDPOINT = "http://localhost:9999/search";
 process.env.WEB_SEARCH_TIMEOUT_MS = "5000";
 process.env.WEB_FETCH_BODY_PREVIEW_MAX = "1000";

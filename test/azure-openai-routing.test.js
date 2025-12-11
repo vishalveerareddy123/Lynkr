@@ -17,6 +17,7 @@ describe("Azure OpenAI Routing Tests", () => {
     delete process.env.OPENROUTER_API_KEY;
 
     // Base config for routing tests
+    process.env.MODEL_PROVIDER = "databricks"; // Set default to avoid validation errors
     process.env.DATABRICKS_API_KEY = "test-key";
     process.env.DATABRICKS_API_BASE = "http://test.com";
   });

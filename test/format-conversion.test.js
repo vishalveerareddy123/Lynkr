@@ -5,8 +5,14 @@ describe("Enhanced Format Conversion", () => {
   let openrouterUtils;
 
   beforeEach(() => {
+    // Set MODEL_PROVIDER to avoid validation errors
+    process.env.MODEL_PROVIDER = "databricks";
+    process.env.DATABRICKS_API_KEY = "test-key";
+    process.env.DATABRICKS_API_BASE = "http://test.com";
+
     // Clear module cache
     delete require.cache[require.resolve("../src/clients/openrouter-utils")];
+    delete require.cache[require.resolve("../src/config")];
     openrouterUtils = require("../src/clients/openrouter-utils");
   });
 
