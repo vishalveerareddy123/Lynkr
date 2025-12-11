@@ -3,3 +3,14 @@ data/
 *.db
 npm-debug.log
 SUBAGENT_IMPLEMENTATION_PLAN_V2.md
+.DS_Store
+test-subagents.sh
+.vscode/
+test-cli-connection.sh
+TESTING_WITH_CLAUDE_CLI.md
+monitor-agents.sh
+.env.test
+.env.local
+test-agents-simple.js
+.claude/
+.env.example

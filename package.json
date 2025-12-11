@@ -1,6 +1,6 @@
 {
   "name": "lynkr",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Self-hosted Claude Code proxy with Databricks and Azure Anthropic adapters, workspace tooling, and MCP integration.",
   "main": "index.js",
   "bin": {
@@ -48,6 +48,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.2.1",
     "fast-glob": "^3.3.2",
+    "js-yaml": "^4.1.1",
     "pino": "^8.17.2",
     "pino-http": "^8.6.0",
     "tree-sitter": "^0.20.1",

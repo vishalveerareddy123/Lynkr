@@ -26,6 +26,7 @@ const { registerGitTools } = require("./tools/git");
 const { registerTaskTools } = require("./tools/tasks");
 const { registerTestTools } = require("./tools/tests");
 const { registerMcpTools } = require("./tools/mcp");
+const { registerAgentTaskTool } = require("./tools/agent-task");
 
 initialiseMcp();
 registerStubTools();
@@ -38,6 +39,7 @@ registerGitTools();
 registerTaskTools();
 registerTestTools();
 registerMcpTools();
+registerAgentTaskTool();
 
 function createApp() {
   const app = express();

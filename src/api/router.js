@@ -250,4 +250,59 @@ router.post("/v1/messages", rateLimiter, async (req, res, next) => {
   }
 });
 
+// List available agents (must come before parameterized routes)
+router.get("/v1/agents", (req, res) => {
+  try {
+    const { listAgents } = require("../agents");
+    const agents = listAgents();
+    res.json({ agents });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Agent stats endpoint (specific path before parameterized)
+router.get("/v1/agents/stats", (req, res) => {
+  try {
+    const { getAgentStats } = require("../agents");
+    const stats = getAgentStats();
+    res.json({ stats });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Read agent transcript (specific path with param before catch-all)
+router.get("/v1/agents/:agentId/transcript", (req, res) => {
+  try {
+    const ContextManager = require("../agents/context-manager");
+    const cm = new ContextManager();
+    const transcript = cm.readTranscript(req.params.agentId);
+
+    if (!transcript) {
+      return res.status(404).json({ error: "Transcript not found" });
+    }
+
+    res.json({ transcript });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Agent execution details (parameterized - must come last)
+router.get("/v1/agents/:executionId", (req, res) => {
+  try {
+    const { getAgentExecution } = require("../agents");
+    const details = getAgentExecution(req.params.executionId);
+
+    if (!details) {
+      return res.status(404).json({ error: "Execution not found" });
+    }
+
+    res.json(details);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

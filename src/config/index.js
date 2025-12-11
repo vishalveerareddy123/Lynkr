@@ -315,6 +315,13 @@ if (testCoverageFiles.length === 0) {
 }
 const testProfiles = parseJson(process.env.WORKSPACE_TEST_PROFILES ?? "", null);
 
+// Agents configuration
+const agentsEnabled = process.env.AGENTS_ENABLED === "true";
+const agentsMaxConcurrent = Number.parseInt(process.env.AGENTS_MAX_CONCURRENT ?? "10", 10);
+const agentsDefaultModel = process.env.AGENTS_DEFAULT_MODEL ?? "haiku";
+const agentsMaxSteps = Number.parseInt(process.env.AGENTS_MAX_STEPS ?? "15", 10);
+const agentsTimeout = Number.parseInt(process.env.AGENTS_TIMEOUT ?? "120000", 10);
+
 const config = {
   env: process.env.NODE_ENV ?? "development",
   port: Number.isNaN(port) ? 8080 : port,
@@ -446,6 +453,13 @@ const config = {
     enabled: promptCacheEnabled,
     maxEntries: Number.isNaN(promptCacheMaxEntriesRaw) ? 64 : promptCacheMaxEntriesRaw,
     ttlMs: Number.isNaN(promptCacheTtlRaw) ? 300000 : promptCacheTtlRaw,
+  },
+  agents: {
+    enabled: agentsEnabled,
+    maxConcurrent: Number.isNaN(agentsMaxConcurrent) ? 10 : agentsMaxConcurrent,
+    defaultModel: agentsDefaultModel,
+    maxSteps: Number.isNaN(agentsMaxSteps) ? 15 : agentsMaxSteps,
+    timeout: Number.isNaN(agentsTimeout) ? 120000 : agentsTimeout,
   },
   tests: {
     defaultCommand: testDefaultCommand ? testDefaultCommand.trim() : null,

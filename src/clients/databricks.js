@@ -6,6 +6,7 @@ const { getCircuitBreakerRegistry } = require("./circuit-breaker");
 const { getMetricsCollector } = require("../observability/metrics");
 const logger = require("../logger");
 const { STANDARD_TOOLS } = require("./standard-tools");
+const { convertAnthropicToolsToOpenRouter } = require("./openrouter-utils");
 
 if (typeof fetch !== "function") {
   throw new Error("Node 18+ is required for the built-in fetch API.");
@@ -119,9 +120,12 @@ async function invokeDatabricks(body) {
     throw new Error("Databricks configuration is missing required URL.");
   }
 
+  // Create a copy of body to avoid mutating the original
+  const databricksBody = { ...body };
+
   // Inject standard tools if client didn't send any (passthrough mode)
-  if (!Array.isArray(body.tools) || body.tools.length === 0) {
-    body.tools = STANDARD_TOOLS;
+  if (!Array.isArray(databricksBody.tools) || databricksBody.tools.length === 0) {
+    databricksBody.tools = STANDARD_TOOLS;
     logger.info({
       injectedToolCount: STANDARD_TOOLS.length,
       injectedToolNames: STANDARD_TOOLS.map(t => t.name),
@@ -129,11 +133,30 @@ async function invokeDatabricks(body) {
     }, "=== INJECTING STANDARD TOOLS (Databricks) ===");
   }
 
+  // Convert Anthropic format tools to OpenAI format (Databricks uses OpenAI format)
+  if (Array.isArray(databricksBody.tools) && databricksBody.tools.length > 0) {
+    // Check if tools are already in OpenAI format (have type: "function")
+    const alreadyConverted = databricksBody.tools[0]?.type === "function";
+
+    if (!alreadyConverted) {
+      databricksBody.tools = convertAnthropicToolsToOpenRouter(databricksBody.tools);
+      logger.debug({
+        convertedToolCount: databricksBody.tools.length,
+        convertedToolNames: databricksBody.tools.map(t => t.function?.name),
+      }, "Converted tools to OpenAI format for Databricks");
+    } else {
+      logger.debug({
+        toolCount: databricksBody.tools.length,
+        toolNames: databricksBody.tools.map(t => t.function?.name),
+      }, "Tools already in OpenAI format, skipping conversion");
+    }
+  }
+
   const headers = {
     Authorization: `Bearer ${config.databricks.apiKey}`,
     "Content-Type": "application/json",
   };
-  return performJsonRequest(config.databricks.url, { headers, body }, "Databricks");
+  return performJsonRequest(config.databricks.url, { headers, body: databricksBody }, "Databricks");
 }
 
 async function invokeAzureAnthropic(body) {
