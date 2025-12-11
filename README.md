@@ -15,21 +15,22 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Core Capabilities](#core-capabilities)
+2. [Supported Models & Providers](#supported-models--providers)
+3. [Core Capabilities](#core-capabilities)
    - [Repo Intelligence & Navigation](#repo-intelligence--navigation)
    - [Git Workflow Enhancements](#git-workflow-enhancements)
    - [Diff & Change Management](#diff--change-management)
    - [Execution & Tooling](#execution--tooling)
    - [Workflow & Collaboration](#workflow--collaboration)
    - [UX, Monitoring, and Logs](#ux-monitoring-and-logs)
-3. [Production Hardening Features](#production-hardening-features)
+4. [Production Hardening Features](#production-hardening-features)
    - [Reliability & Resilience](#reliability--resilience)
    - [Observability & Monitoring](#observability--monitoring)
    - [Security & Governance](#security--governance)
-4. [Architecture](#architecture)
-5. [Getting Started](#getting-started)
-6. [Configuration Reference](#configuration-reference)
-7. [Runtime Operations](#runtime-operations)
+5. [Architecture](#architecture)
+6. [Getting Started](#getting-started)
+7. [Configuration Reference](#configuration-reference)
+8. [Runtime Operations](#runtime-operations)
    - [Launching the Proxy](#launching-the-proxy)
    - [Connecting Claude Code CLI](#connecting-claude-code-cli)
    - [Using Ollama Models](#using-ollama-models)
@@ -39,11 +40,11 @@
    - [Integrating MCP Servers](#integrating-mcp-servers)
    - [Health Checks & Monitoring](#health-checks--monitoring)
    - [Metrics & Observability](#metrics--observability)
-8. [Manual Test Matrix](#manual-test-matrix)
-9. [Troubleshooting](#troubleshooting)
-10. [Roadmap & Known Gaps](#roadmap--known-gaps)
-11. [FAQ](#faq)
-12. [License](#license)
+9. [Manual Test Matrix](#manual-test-matrix)
+10. [Troubleshooting](#troubleshooting)
+11. [Roadmap & Known Gaps](#roadmap--known-gaps)
+12. [FAQ](#faq)
+13. [License](#license)
 
 ---
 
@@ -67,6 +68,105 @@ The result is a production-ready, self-hosted alternative that stays close to An
 > **Compatibility note:** Claude models hosted on Databricks work out of the box. Set `MODEL_PROVIDER=azure-anthropic` (and related credentials) to target the Azure-hosted Anthropic `/anthropic/v1/messages` endpoint. Set `MODEL_PROVIDER=openrouter` to access 100+ models through OpenRouter (GPT-4o, Claude, Gemini, etc.). Set `MODEL_PROVIDER=ollama` to use locally-running Ollama models (qwen2.5-coder, llama3, mistral, etc.).
 
 Further documentation and usage notes are available on [DeepWiki](https://deepwiki.com/vishalveerareddy123/Lynkr).
+
+---
+
+## Supported Models & Providers
+
+Lynkr supports multiple AI model providers, giving you flexibility in choosing the right model for your needs:
+
+### **Provider Options**
+
+| Provider | Configuration | Models Available | Best For |
+|----------|--------------|------------------|----------|
+| **Databricks** (Default) | `MODEL_PROVIDER=databricks` | Claude Sonnet 4.5, Claude Opus 4.5 | Production use, enterprise deployment |
+| **Azure OpenAI** | `MODEL_PROVIDER=azure-openai` | GPT-4o, GPT-4o-mini, GPT-5, o1, o3 | Azure integration, Microsoft ecosystem |
+| **Azure Anthropic** | `MODEL_PROVIDER=azure-anthropic` | Claude Sonnet 4.5, Claude Opus 4.5 | Azure-hosted Claude models |
+| **OpenRouter** | `MODEL_PROVIDER=openrouter` | 100+ models (GPT-4o, Claude, Gemini, Llama, etc.) | Model flexibility, cost optimization |
+| **Ollama** (Local) | `MODEL_PROVIDER=ollama` | Llama 3.1, Qwen2.5, Mistral, CodeLlama | Local/offline use, privacy, no API costs |
+
+### **Recommended Models by Use Case**
+
+#### **For Production Code Assistance**
+- **Best**: Claude Sonnet 4.5 (via Databricks or Azure Anthropic)
+- **Alternative**: GPT-4o (via Azure OpenAI or OpenRouter)
+- **Budget**: GPT-4o-mini (via Azure OpenAI) or Claude Haiku (via OpenRouter)
+
+#### **For Code Generation**
+- **Best**: Claude Opus 4.5 (via Databricks or Azure Anthropic)
+- **Alternative**: GPT-4o (via Azure OpenAI)
+- **Local**: Qwen2.5-Coder 32B (via Ollama)
+
+#### **For Fast Exploration**
+- **Best**: Claude Haiku (via OpenRouter or Azure Anthropic)
+- **Alternative**: GPT-4o-mini (via Azure OpenAI)
+- **Local**: Llama 3.1 8B (via Ollama)
+
+#### **For Cost Optimization**
+- **Cheapest Cloud**: Amazon Nova models (via OpenRouter) - free tier available
+- **Cheapest Local**: Ollama (any model) - completely free, runs on your hardware
+
+### **Azure OpenAI Specific Models**
+
+When using `MODEL_PROVIDER=azure-openai`, you can deploy any of these models:
+
+| Model | Deployment Name | Capabilities | Best For |
+|-------|----------------|--------------|----------|
+| **GPT-4o** | `gpt-4o` | Text, vision, function calling | General-purpose, multimodal tasks |
+| **GPT-4o-mini** | `gpt-4o-mini` | Text, function calling | Fast responses, cost-effective |
+| **GPT-5** | `gpt-5-chat` or custom | Advanced reasoning, longer context | Complex problem-solving |
+| **o1-preview** | `o1-preview` | Deep reasoning, chain of thought | Mathematical, logic problems |
+| **o3-mini** | `o3-mini` | Efficient reasoning | Fast reasoning tasks |
+
+**Note**: Azure OpenAI deployment names are configurable via `AZURE_OPENAI_DEPLOYMENT` environment variable.
+
+### **Ollama Model Recommendations**
+
+For tool calling support (required for Claude Code CLI functionality):
+
+✅ **Recommended**:
+- `llama3.1:8b` - Good balance of speed and capability
+- `llama3.2` - Latest Llama model
+- `qwen2.5:14b` - Strong reasoning (larger model needed, 7b struggles with tools)
+- `mistral:7b-instruct` - Fast and capable
+
+❌ **Not Recommended for Tools**:
+- `qwen2.5-coder` - Code-only, slow with tool calling
+- `codellama` - Code-only, poor tool support
+
+### **Hybrid Routing (Ollama + Cloud Fallback)**
+
+Lynkr supports intelligent hybrid routing for cost optimization:
+
+```bash
+# Use Ollama for simple tasks, fallback to cloud for complex ones
+PREFER_OLLAMA=true
+FALLBACK_ENABLED=true
+FALLBACK_PROVIDER=databricks  # or azure-openai, openrouter, azure-anthropic
+```
+
+**How it works**:
+- Requests with few/no tools → Ollama (free, local)
+- Requests with many tools → Cloud provider (more capable)
+- Ollama failures → Automatic fallback to cloud
+
+**Routing Logic**:
+- 0-2 tools: Ollama
+- 3-15 tools: OpenRouter or Azure OpenAI (if configured)
+- 16+ tools: Databricks or Azure Anthropic (most capable)
+
+### **Provider Comparison**
+
+| Feature | Databricks | Azure OpenAI | Azure Anthropic | OpenRouter | Ollama |
+|---------|-----------|--------------|-----------------|------------|--------|
+| **Setup Complexity** | Medium | Medium | Medium | Easy | Easy |
+| **Cost** | $$$ | $$ | $$$ | $ | Free |
+| **Latency** | Low | Low | Low | Medium | Very Low |
+| **Tool Calling** | Excellent | Excellent | Excellent | Good | Fair |
+| **Context Length** | 200K | 128K | 200K | Varies | 32K-128K |
+| **Streaming** | Yes | Yes | Yes | Yes | Yes |
+| **Privacy** | Enterprise | Enterprise | Enterprise | Third-party | Local |
+| **Offline** | No | No | No | No | Yes |
 
 ---
 

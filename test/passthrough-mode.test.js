@@ -13,6 +13,11 @@ describe("Passthrough Mode (Client-Side Tool Execution)", () => {
     // Ensure clean state for TOOL_EXECUTION_MODE
     delete process.env.TOOL_EXECUTION_MODE;
 
+    // Set MODEL_PROVIDER to databricks for tests (not azure-openai from .env)
+    process.env.MODEL_PROVIDER = "databricks";
+    process.env.DATABRICKS_API_KEY = "test-key";
+    process.env.DATABRICKS_API_BASE = "http://test.com";
+
     // Clear module cache
     delete require.cache[require.resolve("../src/config")];
     delete require.cache[require.resolve("../src/orchestrator/index")];

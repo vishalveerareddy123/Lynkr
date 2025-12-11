@@ -12,7 +12,12 @@ services:
       # ============================================================
       # PRIMARY MODEL PROVIDER
       # ============================================================
-      # Options: ollama, databricks, azure-anthropic, openrouter
+      # Options: ollama, databricks, azure-openai, azure-anthropic, openrouter
+      # - ollama: Local models (free, private, offline)
+      # - databricks: Claude Sonnet 4.5, Opus 4.5 (production)
+      # - azure-openai: GPT-4o, GPT-5, o1, o3 (Azure integration)
+      # - azure-anthropic: Claude models via Azure
+      # - openrouter: 100+ models (flexible, cost-effective)
       MODEL_PROVIDER: ${MODEL_PROVIDER:-ollama}
 
       # ============================================================
@@ -24,11 +29,16 @@ services:
       TOOL_EXECUTION_MODE: ${TOOL_EXECUTION_MODE:-server}
 
       # ============================================================
-      # OLLAMA CONFIGURATION
+      # OLLAMA CONFIGURATION (Local Models)
       # ============================================================
+      # Recommended models for tool calling:
+      # - llama3.1:8b (good balance)
+      # - llama3.2 (latest)
+      # - qwen2.5:14b (strong reasoning, 7b struggles with tools)
+      # - mistral:7b-instruct (fast and capable)
       PREFER_OLLAMA: ${PREFER_OLLAMA:-true}
       OLLAMA_ENDPOINT: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:latest}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
       OLLAMA_MAX_TOOLS_FOR_ROUTING: ${OLLAMA_MAX_TOOLS_FOR_ROUTING:-3}
 
       # ============================================================
@@ -42,6 +52,9 @@ services:
       # ============================================================
       # AZURE OPENAI CONFIGURATION
       # ============================================================
+      # Required when MODEL_PROVIDER=azure-openai
+      # Deployment options: gpt-4o, gpt-4o-mini, gpt-5-chat, o1-preview, o3-mini
+      # Get credentials from: https://portal.azure.com → Azure OpenAI → Keys and Endpoint
       AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
@@ -53,6 +66,7 @@ services:
       # Enable/disable fallback to cloud providers
       FALLBACK_ENABLED: ${FALLBACK_ENABLED:-true}
       # Fallback provider when Ollama can't handle request
+      # Options: databricks, azure-openai, azure-anthropic, openrouter
       FALLBACK_PROVIDER: ${FALLBACK_PROVIDER:-databricks}
 
       # ============================================================

@@ -42,9 +42,10 @@ ENV DATABRICKS_API_BASE="https://example.cloud.databricks.com" \
     DATABRICKS_API_KEY="replace-with-databricks-pat"
 
 # Ollama Configuration (for hybrid routing)
+# Recommended models: llama3.1:8b, llama3.2, qwen2.5:14b, mistral:7b-instruct
 ENV PREFER_OLLAMA="false" \
     OLLAMA_ENDPOINT="http://localhost:11434" \
-    OLLAMA_MODEL="qwen2.5-coder:latest" \
+    OLLAMA_MODEL="llama3.1:8b" \
     OLLAMA_MAX_TOOLS_FOR_ROUTING="3"
 
 # OpenRouter Configuration (optional)
@@ -54,6 +55,7 @@ ENV OPENROUTER_API_KEY="" \
     OPENROUTER_MAX_TOOLS_FOR_ROUTING="15"
 
 # Azure OpenAI Configuration (optional)
+# Deployment options: gpt-4o, gpt-4o-mini, gpt-5-chat, o1-preview, o3-mini
 ENV AZURE_OPENAI_ENDPOINT="" \
     AZURE_OPENAI_API_KEY="" \
     AZURE_OPENAI_DEPLOYMENT="gpt-4o" \

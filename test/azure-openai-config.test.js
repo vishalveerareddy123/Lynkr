@@ -126,6 +126,7 @@ describe("Azure OpenAI Configuration Tests", () => {
     });
 
     it("should warn when azure-openai is fallback but credentials missing", () => {
+      process.env.MODEL_PROVIDER = "databricks"; // Important: set to non-azure-openai
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_ENDPOINT = "http://localhost:11434";
       process.env.OLLAMA_MODEL = "qwen2.5-coder:latest";
