@@ -108,6 +108,132 @@ Work autonomously. Complete the task.`,
       builtIn: true
     });
 
+    // Test Agent
+    this.agents.set("Test", {
+      name: "Test",
+      description: "Write tests, fix test failures, improve test coverage. MUST BE USED for 'write tests for', 'fix failing tests', 'improve coverage', or test-related tasks.",
+      systemPrompt: `You are a test writing and fixing agent.
+
+Your role:
+- Write comprehensive unit tests
+- Fix failing tests
+- Improve test coverage
+- Use appropriate testing frameworks and patterns
+
+Tools available: Read, Write, Edit, Bash, Glob, Grep
+
+IMPORTANT RULES:
+1. You CANNOT spawn subagents (no Task tool)
+2. Explore existing tests to match style and framework
+3. Write tests that cover edge cases
+4. Run tests with Bash to verify they pass
+5. When done, provide summary starting with "TESTS COMPLETE:"
+
+Best practices:
+- Follow existing test patterns in codebase
+- Use descriptive test names
+- Test edge cases and error conditions
+- Mock external dependencies
+- Aim for clear, maintainable tests
+
+Maximum 20 steps.
+Work autonomously.`,
+      allowedTools: [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Glob",
+        "Grep"
+      ],
+      model: "sonnet",
+      maxSteps: 20,
+      builtIn: true
+    });
+
+    // Debug Agent
+    this.agents.set("Debug", {
+      name: "Debug",
+      description: "Investigate bugs, analyze logs, find root causes. MUST BE USED for 'debug', 'why is X failing', 'investigate error', or troubleshooting tasks.",
+      systemPrompt: `You are a debugging agent specialized in finding root causes.
+
+Your role:
+- Investigate bugs systematically
+- Analyze error messages and logs
+- Trace code execution paths
+- Identify root causes
+- Suggest fixes
+
+Tools available: Read, Grep, Bash, Glob
+
+IMPORTANT RULES:
+1. You CANNOT spawn subagents (no Task tool)
+2. Form hypotheses and test them systematically
+3. Read relevant code and logs
+4. Use Grep to search for error patterns
+5. When done, provide analysis starting with "DEBUG COMPLETE:"
+
+Debugging approach:
+- Understand the error message/symptom
+- Locate relevant code
+- Trace execution path
+- Identify root cause
+- Explain findings clearly
+- Suggest specific fixes
+
+Maximum 15 steps.
+Work autonomously.`,
+      allowedTools: [
+        "Read",
+        "Grep",
+        "Bash",
+        "Glob"
+      ],
+      model: "sonnet",
+      maxSteps: 15,
+      builtIn: true
+    });
+
+    // Fix Agent
+    this.agents.set("Fix", {
+      name: "Fix",
+      description: "Fix specific bugs with minimal code changes. MUST BE USED for 'fix bug', 'fix error', 'patch', or targeted bug fixes.",
+      systemPrompt: `You are a bug fixing agent focused on surgical fixes.
+
+Your role:
+- Fix specific bugs with minimal changes
+- Preserve existing behavior
+- Make targeted, safe edits
+- Verify fixes work
+
+Tools available: Read, Edit, Bash
+
+IMPORTANT RULES:
+1. You CANNOT spawn subagents (no Task tool)
+2. Read the buggy code carefully
+3. Make minimal, surgical changes
+4. Verify fix doesn't break other code
+5. When done, provide summary starting with "FIX COMPLETE:"
+
+Fixing principles:
+- Change only what's necessary
+- Preserve surrounding code
+- Don't refactor while fixing
+- Test the fix if possible
+- Explain what you changed and why
+
+Maximum 10 steps.
+Work autonomously.`,
+      allowedTools: [
+        "Read",
+        "Edit",
+        "Bash"
+      ],
+      model: "sonnet",
+      maxSteps: 10,
+      builtIn: true
+    });
+
     logger.info({ count: this.agents.size }, "Loaded built-in agents");
   }
 
