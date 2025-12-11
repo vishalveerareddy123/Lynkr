@@ -29,8 +29,42 @@ const httpsAgent = new https.Agent({
 
 async function performJsonRequest(url, { headers = {}, body }, providerLabel) {
   const agent = url.startsWith('https:') ? httpsAgent : httpAgent;
+  const isStreaming = body.stream === true;
 
-  // Wrap with retry logic
+  // Streaming requests can't be retried, so handle them directly
+  if (isStreaming) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      agent,
+    });
+
+    logger.debug({
+      provider: providerLabel,
+      status: response.status,
+      streaming: true,
+    }, `${providerLabel} API streaming response`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn({
+        provider: providerLabel,
+        status: response.status,
+        error: errorText.substring(0, 200),
+      }, `${providerLabel} API streaming error`);
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      stream: response.body, // Return the readable stream
+      contentType: response.headers.get("content-type"),
+      headers: response.headers,
+    };
+  }
+
+  // Non-streaming requests use retry logic
   return withRetry(async () => {
     const response = await fetch(url, {
       method: "POST",
@@ -138,7 +172,7 @@ async function invokeOllama(body) {
   const ollamaBody = {
     model: config.ollama.model,
     messages: convertedMessages,
-    stream: false,
+    stream: body.stream ?? false,
     options: {
       temperature: body.temperature ?? 0.7,
       num_predict: body.max_tokens ?? 4096,
@@ -156,6 +190,45 @@ async function invokeOllama(body) {
   }
 
   return performJsonRequest(endpoint, { headers, body: ollamaBody }, "Ollama");
+}
+
+async function invokeOpenRouter(body) {
+  if (!config.openrouter?.endpoint || !config.openrouter?.apiKey) {
+    throw new Error("OpenRouter endpoint or API key is not configured.");
+  }
+
+  const {
+    convertAnthropicToolsToOpenRouter,
+    convertAnthropicMessagesToOpenRouter
+  } = require("./openrouter-utils");
+
+  const endpoint = config.openrouter.endpoint;
+  const headers = {
+    "Authorization": `Bearer ${config.openrouter.apiKey}`,
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://localhost:8080",
+    "X-Title": "Claude-Ollama-Proxy"
+  };
+
+  const openRouterBody = {
+    model: config.openrouter.model,
+    messages: convertAnthropicMessagesToOpenRouter(body.messages || []),
+    temperature: body.temperature ?? 0.7,
+    max_tokens: body.max_tokens ?? 4096,
+    top_p: body.top_p ?? 1.0,
+    stream: body.stream ?? false
+  };
+
+  // Add tools if present
+  if (Array.isArray(body.tools) && body.tools.length > 0) {
+    openRouterBody.tools = convertAnthropicToolsToOpenRouter(body.tools);
+    logger.debug({
+      toolCount: body.tools.length,
+      toolNames: body.tools.map(t => t.name)
+    }, "Sending tools to OpenRouter");
+  }
+
+  return performJsonRequest(endpoint, { headers, body: openRouterBody }, "OpenRouter");
 }
 
 async function invokeModel(body, options = {}) {
@@ -193,6 +266,8 @@ async function invokeModel(body, options = {}) {
         return await invokeAzureAnthropic(body);
       } else if (initialProvider === "ollama") {
         return await invokeOllama(body);
+      } else if (initialProvider === "openrouter") {
+        return await invokeOpenRouter(body);
       }
       return await invokeDatabricks(body);
     });
@@ -264,6 +339,8 @@ async function invokeModel(body, options = {}) {
       const fallbackResult = await fallbackBreaker.execute(async () => {
         if (fallbackProvider === "azure-anthropic") {
           return await invokeAzureAnthropic(body);
+        } else if (fallbackProvider === "openrouter") {
+          return await invokeOpenRouter(body);
         }
         return await invokeDatabricks(body);
       });

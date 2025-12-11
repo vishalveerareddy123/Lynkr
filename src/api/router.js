@@ -2,8 +2,12 @@ const express = require("express");
 const { processMessage } = require("../orchestrator");
 const { getSession } = require("../sessions");
 const metrics = require("../metrics");
+const { createRateLimiter } = require("./middleware/rate-limiter");
 
 const router = express.Router();
+
+// Create rate limiter middleware
+const rateLimiter = createRateLimiter();
 
 /**
  * Estimate token count for messages
@@ -65,7 +69,7 @@ router.get("/debug/session", (req, res) => {
   res.json({ session });
 });
 
-router.post("/v1/messages/count_tokens", async (req, res, next) => {
+router.post("/v1/messages/count_tokens", rateLimiter, async (req, res, next) => {
   try {
     const { messages, system } = req.body;
 
@@ -97,11 +101,101 @@ router.post("/api/event_logging/batch", (req, res) => {
   res.status(200).json({ success: true });
 });
 
-router.post("/v1/messages", async (req, res, next) => {
+router.post("/v1/messages", rateLimiter, async (req, res, next) => {
   try {
     metrics.recordRequest();
     // Support both query parameter (?stream=true) and body parameter ({"stream": true})
     const wantsStream = Boolean(req.query?.stream === 'true' || req.body?.stream);
+    const hasTools = Array.isArray(req.body?.tools) && req.body.tools.length > 0;
+
+    // For true streaming: only support non-tool requests for MVP
+    // Tool requests require buffering for agent loop
+    if (wantsStream && !hasTools) {
+      // True streaming path for text-only requests
+      metrics.recordStreamingStart();
+      res.set({
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      if (typeof res.flushHeaders === "function") {
+        res.flushHeaders();
+      }
+
+      const result = await processMessage({
+        payload: req.body,
+        headers: req.headers,
+        session: req.session,
+        options: {
+          maxSteps: req.body?.max_steps,
+          maxDurationMs: req.body?.max_duration_ms,
+        },
+      });
+
+      // Check if we got a stream back
+      if (result.stream) {
+        // Parse SSE stream from provider and forward to client
+        const reader = result.stream.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+            for (const line of lines) {
+              if (line.trim()) {
+                res.write(line + '\n');
+              }
+            }
+
+            // Flush after each chunk
+            if (typeof res.flush === 'function') {
+              res.flush();
+            }
+          }
+
+          // Send any remaining buffer
+          if (buffer.trim()) {
+            res.write(buffer + '\n');
+          }
+
+          metrics.recordResponse(200);
+          res.end();
+          return;
+        } catch (streamError) {
+          logger.error({ error: streamError }, "Error streaming response");
+          if (!res.headersSent) {
+            res.status(500).json({ error: "Streaming error" });
+          } else {
+            res.end();
+          }
+          return;
+        }
+      }
+
+      // Fallback: if no stream, wrap buffered response in SSE (old behavior)
+      const eventPayload = {
+        type: "message",
+        message: result.body,
+      };
+      res.write(`event: message\n`);
+      res.write(`data: ${JSON.stringify(eventPayload)}\n\n`);
+      res.write(`event: end\n`);
+      res.write(
+        `data: ${JSON.stringify({ termination: result.terminationReason ?? "completion" })}\n\n`,
+      );
+      metrics.recordResponse(result.status);
+      res.end();
+      return;
+    }
+
+    // Non-streaming or tool-based requests (buffered path)
     const result = await processMessage({
       payload: req.body,
       headers: req.headers,
@@ -112,7 +206,8 @@ router.post("/v1/messages", async (req, res, next) => {
       },
     });
 
-    if (wantsStream) {
+    // Legacy streaming wrapper (for tool-based requests that requested streaming)
+    if (wantsStream && hasTools) {
       metrics.recordStreamingStart();
       res.set({
         "Content-Type": "text/event-stream",

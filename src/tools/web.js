@@ -2,8 +2,53 @@ const { URL } = require("url");
 const config = require("../config");
 const logger = require("../logger");
 const { registerTool } = require(".");
+const { withRetry } = require("../clients/retry");
+const { fetchWithAgent } = require("./web-client");
 
 const DEFAULT_MAX_RESULTS = 5;
+
+/**
+ * Extract readable text from HTML
+ * Removes scripts, styles, and extracts meaningful content
+ */
+function extractTextFromHtml(html) {
+  if (typeof html !== "string") return "";
+
+  let text = html;
+
+  // Remove script and style tags with their content
+  text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ");
+  text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ");
+
+  // Remove HTML comments
+  text = text.replace(/<!--[\s\S]*?-->/g, " ");
+
+  // Convert common block elements to newlines
+  text = text.replace(/<\/(div|p|br|h[1-6]|li|tr|section|article|header|footer|nav)>/gi, "\n");
+
+  // Remove all remaining HTML tags
+  text = text.replace(/<[^>]+>/g, " ");
+
+  // Decode common HTML entities
+  text = text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+
+  // Normalize whitespace
+  text = text.replace(/\r\n/g, "\n");
+  text = text.replace(/\r/g, "\n");
+  text = text.replace(/[ \t]+/g, " ");
+  text = text.replace(/\n\s+/g, "\n");
+  text = text.replace(/\n{3,}/g, "\n\n");
+
+  return text.trim();
+}
+
 function normaliseQuery(args = {}) {
   const query = args.query ?? args.q ?? args.prompt ?? args.search ?? args.input;
   if (typeof query !== "string" || query.trim().length === 0) {
@@ -49,34 +94,57 @@ function buildSearchUrl({ query, limit }) {
 async function performSearch({ query, limit, timeoutMs }) {
   const url = buildSearchUrl({ query, limit });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  // Wrap fetch in retry logic if enabled
+  const fetchFn = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-    });
-
-    const text = await response.text();
-    let json;
     try {
-      json = JSON.parse(text);
-    } catch {
-      json = null;
-    }
+      const response = await fetchWithAgent(url, {
+        method: "GET",
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      const error = new Error("Web search provider returned an error.");
-      error.status = response.status;
-      error.body = text;
+      const text = await response.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
+
+      if (!response.ok) {
+        const error = new Error(`Web search provider error (${response.status}): ${response.statusText}`);
+        error.status = response.status;
+        error.body = text;
+        error.code = response.status === 429 ? "RATE_LIMITED" :
+                     response.status >= 500 ? "SERVER_ERROR" : "REQUEST_ERROR";
+        throw error;
+      }
+
+      return json ?? { results: [], raw: text };
+    } catch (error) {
+      if (error.name === "AbortError") {
+        const timeoutError = new Error(`Web search timeout after ${timeoutMs}ms`);
+        timeoutError.code = "ETIMEDOUT";
+        throw timeoutError;
+      }
       throw error;
+    } finally {
+      clearTimeout(timeout);
     }
+  };
 
-    return json ?? { results: [], raw: text };
-  } finally {
-    clearTimeout(timeout);
+  // Apply retry logic if enabled
+  if (config.webSearch.retryEnabled) {
+    return withRetry(fetchFn, {
+      maxRetries: config.webSearch.maxRetries,
+      initialDelay: 500,
+      maxDelay: 5000,
+    });
   }
+
+  return fetchFn();
 }
 
 function summariseResult(item) {
@@ -143,19 +211,51 @@ function ensureHostAllowed(url, allowedHosts) {
 }
 
 async function fetchDocument(url, timeoutMs) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url.toString(), { signal: controller.signal });
-    const text = await response.text();
-    return {
-      status: response.status,
-      headers: Object.fromEntries(response.headers.entries()),
-      body: text,
-    };
-  } finally {
-    clearTimeout(timeout);
+  // Wrap fetch in retry logic
+  const fetchFn = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetchWithAgent(url.toString(), { signal: controller.signal });
+      const text = await response.text();
+
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        error.status = response.status;
+        error.code = response.status === 429 ? "RATE_LIMITED" :
+                     response.status >= 500 ? "SERVER_ERROR" : "REQUEST_ERROR";
+        throw error;
+      }
+
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body: text,
+        contentType: response.headers.get("content-type") || "",
+      };
+    } catch (error) {
+      if (error.name === "AbortError") {
+        const timeoutError = new Error(`Web fetch timeout after ${timeoutMs}ms`);
+        timeoutError.code = "ETIMEDOUT";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  // Apply retry logic if enabled
+  if (config.webSearch.retryEnabled) {
+    return withRetry(fetchFn, {
+      maxRetries: config.webSearch.maxRetries,
+      initialDelay: 500,
+      maxDelay: 5000,
+    });
   }
+
+  return fetchFn();
 }
 
 function registerWebSearchTool() {
@@ -235,26 +335,51 @@ function registerWebFetchTool() {
       const timeoutMs = config.webSearch.timeoutMs;
       try {
         const document = await fetchDocument(url, timeoutMs);
+
+        // Extract text content from HTML if content type indicates HTML
+        const isHtml = document.contentType.toLowerCase().includes("text/html");
+        const rawBody = document.body;
+        const bodyPreview = rawBody.slice(0, config.webSearch.bodyPreviewMax);
+
+        // For HTML, provide both raw preview and extracted text
+        const result = {
+          url: url.toString(),
+          status: document.status,
+          content_type: document.contentType,
+          headers: document.headers,
+          body_preview: bodyPreview,
+        };
+
+        if (isHtml) {
+          const extractedText = extractTextFromHtml(rawBody);
+          result.text_content = extractedText.slice(0, config.webSearch.bodyPreviewMax);
+          result.text_length = extractedText.length;
+          logger.debug({
+            url: url.toString(),
+            originalLength: rawBody.length,
+            extractedLength: extractedText.length,
+          }, "Extracted text from HTML");
+        }
+
         return {
           ok: document.status >= 200 && document.status < 400,
           status: document.status,
-          content: JSON.stringify(
-            {
-              url: url.toString(),
-              status: document.status,
-              headers: document.headers,
-              body_preview: document.body.slice(0, 4000),
-            },
-            null,
-            2,
-          ),
+          content: JSON.stringify(result, null, 2),
           metadata: {
             url: url.toString(),
             status: document.status,
+            content_type: document.contentType,
+            is_html: isHtml,
           },
         };
       } catch (err) {
-        logger.error({ err, url: url.toString() }, "web_fetch failed");
+        logger.error({
+          err,
+          url: url.toString(),
+          code: err.code,
+          status: err.status
+        }, "web_fetch failed");
+
         return {
           ok: false,
           status: err.status ?? 500,
@@ -262,12 +387,16 @@ function registerWebFetchTool() {
             {
               error: err.code ?? "web_fetch_failed",
               message: err.message,
+              url: url.toString(),
+              ...(err.status ? { http_status: err.status } : {}),
             },
             null,
             2,
           ),
           metadata: {
             url: url.toString(),
+            error_code: err.code,
+            ...(err.status ? { http_status: err.status } : {}),
           },
         };
       }

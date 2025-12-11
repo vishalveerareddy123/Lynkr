@@ -192,17 +192,17 @@ async function startOllama() {
   return true;
 }
 
-async function pullModel(modelName = "qwen2.5-coder:latest") {
+async function pullModel(modelName = "llama3.1:8b") {
   log(`\n📦 Downloading ${modelName} model...`, "cyan");
   log("   Model size: ~4.7GB", "blue");
   log("   This may take 10-30 minutes depending on your connection.", "yellow");
-  log("   You can cancel and run this later with: ollama pull qwen2.5-coder:latest\n", "yellow");
+  log("   You can cancel and run this later with: ollama pull llama3.1:8b\n", "yellow");
 
   const answer = await promptUser("   Continue with model download? [Y/n]: ");
 
   if (answer === "n" || answer === "no") {
     log("\n⏭️  Skipping model download", "yellow");
-    log("   You can download it later with: ollama pull qwen2.5-coder:latest", "cyan");
+    log("   You can download it later with: ollama pull llama3.1:8b", "cyan");
     return false;
   }
 
@@ -212,7 +212,7 @@ async function pullModel(modelName = "qwen2.5-coder:latest") {
     return true;
   } catch (error) {
     log(`\n❌ Failed to download model: ${error.message}`, "red");
-    log("   You can download it later with: ollama pull qwen2.5-coder:latest", "yellow");
+    log("   You can download it later with: ollama pull llama3.1:8b", "yellow");
     return false;
   }
 }
@@ -246,9 +246,9 @@ async function createEnvFile() {
     const envContent = `# Lynkr Configuration
 PREFER_OLLAMA=true
 OLLAMA_ENDPOINT=http://localhost:11434
-OLLAMA_MODEL=qwen2.5-coder:latest
-OLLAMA_FALLBACK_PROVIDER=databricks
-OLLAMA_FALLBACK_ENABLED=true
+OLLAMA_MODEL=llama3.1:8b
+FALLBACK_PROVIDER=databricks
+FALLBACK_ENABLED=true
 
 # Add your Databricks credentials below
 DATABRICKS_API_BASE=https://your-workspace.cloud.databricks.com
@@ -274,15 +274,15 @@ async function printSummary(modelDownloaded) {
   log("\n📋 What was installed:", "cyan");
   log("   ✅ Ollama service", "green");
   if (modelDownloaded) {
-    log("   ✅ qwen2.5-coder:latest model", "green");
+    log("   ✅ llama3.1:8b model", "green");
   } else {
-    log("   ⏭️  Model (skipped - run: ollama pull qwen2.5-coder:latest)", "yellow");
+    log("   ⏭️  Model (skipped - run: ollama pull llama3.1:8b)", "yellow");
   }
 
   log("\n🚀 Next Steps:", "cyan");
 
   if (!modelDownloaded) {
-    log("   1. Download model: ollama pull qwen2.5-coder:latest", "blue");
+    log("   1. Download model: ollama pull llama3.1:8b", "blue");
     log("   2. Edit .env with your Databricks credentials", "blue");
     log("   3. Start Lynkr: lynkr", "blue");
   } else {

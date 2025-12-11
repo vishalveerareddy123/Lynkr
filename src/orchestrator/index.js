@@ -539,21 +539,74 @@ function normaliseToolChoice(choice) {
   return undefined;
 }
 
+/**
+ * Strip thinking-style reasoning from Ollama model outputs
+ * Patterns to remove:
+ * - Lines starting with bullet points (●, •, -, *)
+ * - Explanatory reasoning before the actual response
+ * - Multiple newlines used to separate thinking from response
+ */
+function stripThinkingBlocks(text) {
+  if (typeof text !== "string") return text;
+
+  // Split into lines
+  const lines = text.split("\n");
+  const cleanedLines = [];
+  let inThinkingBlock = false;
+  let consecutiveEmptyLines = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Detect thinking block markers (bullet points followed by reasoning)
+    if (/^[●•\-\*]\s/.test(trimmed)) {
+      inThinkingBlock = true;
+      continue;
+    }
+
+    // Empty lines might separate thinking from response
+    if (trimmed === "") {
+      consecutiveEmptyLines++;
+      // If we've seen 2+ empty lines, likely end of thinking block
+      if (consecutiveEmptyLines >= 2) {
+        inThinkingBlock = false;
+      }
+      continue;
+    }
+
+    // Reset empty line counter
+    consecutiveEmptyLines = 0;
+
+    // Skip lines that are part of thinking block
+    if (inThinkingBlock) {
+      continue;
+    }
+
+    // Keep this line
+    cleanedLines.push(line);
+  }
+
+  return cleanedLines.join("\n").trim();
+}
+
 function ollamaToAnthropicResponse(ollamaResponse, requestedModel) {
   // Ollama response format:
   // { model, created_at, message: { role, content, tool_calls }, done, total_duration, ... }
   // { eval_count, prompt_eval_count, ... }
 
   const message = ollamaResponse?.message ?? {};
-  const content = message.content || "";
+  const rawContent = message.content || "";
   const toolCalls = message.tool_calls || [];
 
   // Build content blocks
   const contentItems = [];
 
-  // Add text content if present
-  if (typeof content === "string" && content.trim()) {
-    contentItems.push({ type: "text", text: content });
+  // Add text content if present, after stripping thinking blocks
+  if (typeof rawContent === "string" && rawContent.trim()) {
+    const cleanedContent = stripThinkingBlocks(rawContent);
+    if (cleanedContent) {
+      contentItems.push({ type: "text", text: cleanedContent });
+    }
   }
 
   // Add tool calls if present
@@ -830,19 +883,97 @@ function sanitizePayload(payload) {
     const { modelNameSupportsTools } = require("../clients/ollama-utils");
     const modelSupportsTools = modelNameSupportsTools(config.ollama?.model);
 
-    if (modelSupportsTools && Array.isArray(clean.tools) && clean.tools.length > 0) {
-      // Keep tools for tool-capable models (will be converted in client)
+    // Check if this is a simple conversational message (no tools needed)
+    const isConversational = (() => {
+      if (!Array.isArray(clean.messages) || clean.messages.length === 0) {
+        logger.debug({ reason: "No messages array" }, "Ollama conversational check");
+        return false;
+      }
+      const lastMessage = clean.messages[clean.messages.length - 1];
+      if (lastMessage?.role !== "user") {
+        logger.debug({ role: lastMessage?.role }, "Ollama conversational check - not user");
+        return false;
+      }
+
+      const content = typeof lastMessage.content === "string"
+        ? lastMessage.content
+        : "";
+
+      logger.debug({
+        contentType: typeof lastMessage.content,
+        isString: typeof lastMessage.content === "string",
+        contentLength: typeof lastMessage.content === "string" ? lastMessage.content.length : "N/A",
+        actualContent: typeof lastMessage.content === "string" ? lastMessage.content.substring(0, 100) : JSON.stringify(lastMessage.content).substring(0, 100)
+      }, "Ollama conversational check - analyzing content");
+
+      const trimmed = content.trim().toLowerCase();
+
+      // Simple greetings
+      if (/^(hi|hello|hey|good morning|good afternoon|good evening|howdy|greetings)[\s\.\!\?]*$/.test(trimmed)) {
+        logger.debug({ matched: "greeting", trimmed }, "Ollama conversational check - matched");
+        return true;
+      }
+
+      // Very short messages (< 20 chars) without code/technical keywords
+      if (trimmed.length < 20 && !/code|file|function|error|bug|fix|write|read|create/.test(trimmed)) {
+        logger.debug({ matched: "short", trimmed, length: trimmed.length }, "Ollama conversational check - matched");
+        return true;
+      }
+
+      logger.debug({ trimmed: trimmed.substring(0, 50), length: trimmed.length }, "Ollama conversational check - not matched");
+      return false;
+    })();
+
+    if (isConversational) {
+      // Strip all tools for simple conversational messages
+      delete clean.tools;
+      delete clean.tool_choice;
       logger.debug({
         model: config.ollama?.model,
-        toolCount: clean.tools.length,
-      }, "Ollama model supports tools, keeping them");
-      // Keep clean.tools as-is
+        message: "Removed tools for conversational message"
+      }, "Ollama conversational mode");
+    } else if (modelSupportsTools && Array.isArray(clean.tools) && clean.tools.length > 0) {
+      // Ollama performance degrades with too many tools
+      // Limit to essential tools only
+      const OLLAMA_ESSENTIAL_TOOLS = new Set([
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch"
+      ]);
+
+      const limitedTools = clean.tools.filter(tool =>
+        OLLAMA_ESSENTIAL_TOOLS.has(tool.name)
+      );
+
+      logger.debug({
+        model: config.ollama?.model,
+        originalToolCount: clean.tools.length,
+        limitedToolCount: limitedTools.length,
+        keptTools: limitedTools.map(t => t.name)
+      }, "Ollama tools limited for performance");
+
+      clean.tools = limitedTools.length > 0 ? limitedTools : undefined;
+      if (!clean.tools) {
+        delete clean.tools;
+      }
     } else {
       // Remove tools for models without tool support
       delete clean.tools;
       delete clean.tool_choice;
     }
+  } else if (providerType === "openrouter") {
+    // OpenRouter supports tools - keep them as-is
+    // Tools are already in Anthropic format and will be converted by openrouter-utils
+    if (!Array.isArray(clean.tools) || clean.tools.length === 0) {
+      delete clean.tools;
+    }
   } else if (Array.isArray(clean.tools)) {
+    // Unknown provider - remove tools for safety
     delete clean.tools;
   }
 
@@ -864,7 +995,7 @@ function sanitizePayload(payload) {
     delete clean.tool_choice;
   }
 
-  clean.stream = false;
+  clean.stream = payload.stream ?? false;
 
   if (
     config.modelProvider?.type === "azure-anthropic" &&
@@ -929,6 +1060,17 @@ function buildNonJsonResponse(databricksResponse) {
   };
 }
 
+function buildStreamingResponse(databricksResponse) {
+  return {
+    status: databricksResponse.status,
+    headers: {
+      "Content-Type": databricksResponse.contentType ?? "text/event-stream",
+    },
+    stream: databricksResponse.stream,
+    terminationReason: "streaming",
+  };
+}
+
 function buildErrorResponse(databricksResponse) {
   return {
     status: databricksResponse.status,
@@ -982,6 +1124,23 @@ async function runAgentLoop({
     }
     
     const databricksResponse = await invokeModel(cleanPayload);
+
+    // Handle streaming responses (pass through without buffering)
+    if (databricksResponse.stream) {
+      logger.debug(
+        {
+          sessionId: session?.id ?? null,
+          status: databricksResponse.status,
+        },
+        "Streaming response received, passing through"
+      );
+      return {
+        response: buildStreamingResponse(databricksResponse),
+        steps,
+        durationMs: Date.now() - start,
+        terminationReason: "streaming",
+      };
+    }
 
     if (!databricksResponse.json) {
       appendTurnToSession(session, {
@@ -1076,11 +1235,59 @@ async function runAgentLoop({
     }
 
     if (toolCalls.length > 0) {
+      // Convert OpenAI/OpenRouter format to Anthropic format for session storage
+      let sessionContent;
+      if (providerType === "azure-anthropic") {
+        // Azure Anthropic already returns content in Anthropic format
+        sessionContent = databricksResponse.json?.content ?? [];
+      } else {
+        // Convert OpenAI/OpenRouter format to Anthropic content blocks
+        const contentBlocks = [];
+
+        // Add text content if present
+        if (message.content && typeof message.content === 'string' && message.content.trim()) {
+          contentBlocks.push({
+            type: "text",
+            text: message.content
+          });
+        }
+
+        // Add tool_use blocks from tool_calls
+        for (const toolCall of toolCalls) {
+          const func = toolCall.function || {};
+          let input = {};
+
+          // Parse arguments string to object
+          if (func.arguments) {
+            try {
+              input = typeof func.arguments === "string"
+                ? JSON.parse(func.arguments)
+                : func.arguments;
+            } catch (err) {
+              logger.warn({
+                error: err.message,
+                arguments: func.arguments
+              }, "Failed to parse tool arguments for session storage");
+              input = {};
+            }
+          }
+
+          contentBlocks.push({
+            type: "tool_use",
+            id: toolCall.id || `toolu_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: func.name || toolCall.name || "unknown",
+            input
+          });
+        }
+
+        sessionContent = contentBlocks;
+      }
+
       appendTurnToSession(session, {
         role: "assistant",
         type: "tool_request",
         status: 200,
-        content: message,
+        content: sessionContent,
         metadata: {
           termination: "tool_use",
           toolCalls: toolCalls.map((call) => ({
@@ -1121,6 +1328,70 @@ async function runAgentLoop({
       }
 
       cleanPayload.messages.push(assistantToolMessage);
+
+      // Check if tool execution should happen on client side
+      const executionMode = config.toolExecutionMode || "server";
+      if (executionMode === "passthrough" || executionMode === "client") {
+        logger.info(
+          {
+            sessionId: session?.id ?? null,
+            toolCount: toolCalls.length,
+            executionMode,
+            toolNames: toolCalls.map((c) => c.function?.name ?? c.name),
+          },
+          "Passthrough mode: returning tool calls to client for execution"
+        );
+
+        // Convert OpenRouter response to Anthropic format for CLI
+        const anthropicResponse = {
+          id: databricksResponse.json?.id || `msg_${Date.now()}`,
+          type: "message",
+          role: "assistant",
+          content: sessionContent, // Already in Anthropic format with tool_use blocks
+          model: databricksResponse.json?.model || clean.model,
+          stop_reason: "tool_use",
+          usage: databricksResponse.json?.usage || {
+            input_tokens: 0,
+            output_tokens: 0,
+          },
+        };
+
+        // Debug: Log the actual content being returned
+        logger.debug(
+          {
+            sessionId: session?.id ?? null,
+            contentLength: Array.isArray(sessionContent) ? sessionContent.length : 0,
+            contentTypes: Array.isArray(sessionContent) ? sessionContent.map(b => b.type) : [],
+            firstBlock: Array.isArray(sessionContent) && sessionContent.length > 0 ? sessionContent[0] : null,
+            responseId: anthropicResponse.id,
+            stopReason: anthropicResponse.stop_reason,
+          },
+          "Passthrough: returning Anthropic-formatted response with content blocks"
+        );
+
+        // Return Anthropic-formatted response to CLI
+        // The CLI will execute the tools and send another request with tool_result blocks
+        // IMPORTANT: Must match agent loop return format (response wrapper)
+        return {
+          response: {
+            status: 200,
+            body: anthropicResponse,
+            terminationReason: "tool_use",
+          },
+          steps,
+          durationMs: Date.now() - start,
+          terminationReason: "tool_use",
+        };
+      }
+
+      logger.debug(
+        {
+          sessionId: session?.id ?? null,
+          toolCount: toolCalls.length,
+          executionMode,
+        },
+        "Server mode: executing tools on server"
+      );
 
       // Evaluate policy for all tools first (must be sequential for rate limiting)
       const toolCallsWithPolicy = [];
@@ -1185,11 +1456,28 @@ async function runAgentLoop({
           }
 
           cleanPayload.messages.push(toolResultMessage);
+
+          // Convert to Anthropic format for session storage
+          let sessionToolResult;
+          if (providerType === "azure-anthropic") {
+            sessionToolResult = toolResultMessage.content;
+          } else {
+            // Convert OpenRouter tool message to Anthropic format
+            sessionToolResult = [
+              {
+                type: "tool_result",
+                tool_use_id: toolResultMessage.tool_call_id,
+                content: toolResultMessage.content,
+                is_error: true,
+              },
+            ];
+          }
+
           appendTurnToSession(session, {
             role: "tool",
             type: "tool_result",
             status: decision.status ?? 403,
-            content: toolResultMessage,
+            content: sessionToolResult,
             metadata: {
               tool: toolResultMessage.name,
               ok: false,
@@ -1265,11 +1553,28 @@ async function runAgentLoop({
 
         cleanPayload.messages.push(toolMessage);
 
+        // Convert to Anthropic format for session storage
+        let sessionToolResultContent;
+        if (providerType === "azure-anthropic") {
+          // Azure Anthropic already has content in correct format
+          sessionToolResultContent = toolMessage.content;
+        } else {
+          // Convert OpenRouter tool message to Anthropic format
+          sessionToolResultContent = [
+            {
+              type: "tool_result",
+              tool_use_id: toolMessage.tool_call_id,
+              content: toolMessage.content,
+              is_error: execution.ok === false,
+            },
+          ];
+        }
+
         appendTurnToSession(session, {
           role: "tool",
           type: "tool_result",
           status: execution.status,
-          content: toolMessage,
+          content: sessionToolResultContent,
           metadata: {
             tool: execution.name,
             ok: execution.ok,
@@ -1313,6 +1618,38 @@ async function runAgentLoop({
       }
     } else if (actualProvider === "ollama") {
       anthropicPayload = ollamaToAnthropicResponse(
+        databricksResponse.json,
+        requestedModel,
+      );
+      anthropicPayload.content = policy.sanitiseContent(anthropicPayload.content);
+    } else if (actualProvider === "openrouter") {
+      const { convertOpenRouterResponseToAnthropic } = require("../clients/openrouter-utils");
+
+      // Validate OpenRouter response has choices array before conversion
+      if (!databricksResponse.json?.choices?.length) {
+        logger.warn({
+          json: databricksResponse.json,
+          status: databricksResponse.status
+        }, "OpenRouter response missing choices array");
+
+        appendTurnToSession(session, {
+          role: "assistant",
+          type: "error",
+          status: databricksResponse.status,
+          content: databricksResponse.json,
+          metadata: { termination: "malformed_response" },
+        });
+
+        const response = buildErrorResponse(databricksResponse);
+        return {
+          response,
+          steps,
+          durationMs: Date.now() - start,
+          terminationReason: response.terminationReason,
+        };
+      }
+
+      anthropicPayload = convertOpenRouterResponseToAnthropic(
         databricksResponse.json,
         requestedModel,
       );
@@ -1451,11 +1788,53 @@ async function runAgentLoop({
           });
 
           cleanPayload.messages.push(assistantToolMessage);
+
+          // Convert to Anthropic format for session storage
+          let sessionFallbackContent;
+          if (providerType === "azure-anthropic") {
+            // Already in Anthropic format
+            sessionFallbackContent = assistantToolMessage.content;
+          } else {
+            // Convert OpenRouter format to Anthropic format
+            const contentBlocks = [];
+            if (assistantToolMessage.content && typeof assistantToolMessage.content === 'string' && assistantToolMessage.content.trim()) {
+              contentBlocks.push({
+                type: "text",
+                text: assistantToolMessage.content
+              });
+            }
+
+            // Add tool_use blocks from tool_calls
+            if (Array.isArray(assistantToolMessage.tool_calls)) {
+              for (const tc of assistantToolMessage.tool_calls) {
+                const func = tc.function || {};
+                let input = {};
+                if (func.arguments) {
+                  try {
+                    input = typeof func.arguments === "string" ? JSON.parse(func.arguments) : func.arguments;
+                  } catch (err) {
+                    logger.warn({ error: err.message }, "Failed to parse fallback tool arguments");
+                    input = {};
+                  }
+                }
+
+                contentBlocks.push({
+                  type: "tool_use",
+                  id: tc.id || `toolu_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                  name: func.name || "unknown",
+                  input
+                });
+              }
+            }
+
+            sessionFallbackContent = contentBlocks;
+          }
+
           appendTurnToSession(session, {
             role: "assistant",
             type: "tool_request",
             status: 200,
-            content: assistantToolMessage,
+            content: sessionFallbackContent,
             metadata: {
               termination: "tool_use",
               toolCalls: [{ id: attemptCall.id, name: attemptCall.function.name }],
@@ -1476,11 +1855,29 @@ async function runAgentLoop({
           });
 
           cleanPayload.messages.push(toolResultMessage);
+
+          // Convert to Anthropic format for session storage
+          let sessionFallbackToolResult;
+          if (providerType === "azure-anthropic") {
+            // Already in Anthropic format
+            sessionFallbackToolResult = toolResultMessage.content;
+          } else {
+            // Convert OpenRouter tool message to Anthropic format
+            sessionFallbackToolResult = [
+              {
+                type: "tool_result",
+                tool_use_id: toolResultMessage.tool_call_id,
+                content: toolResultMessage.content,
+                is_error: execution.ok === false,
+              },
+            ];
+          }
+
           appendTurnToSession(session, {
             role: "tool",
             type: "tool_result",
             status: execution.status,
-            content: toolResultMessage,
+            content: sessionFallbackToolResult,
             metadata: {
               tool: attemptCall.function.name,
               ok: execution.ok,

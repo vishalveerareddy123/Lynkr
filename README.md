@@ -26,7 +26,6 @@
    - [Reliability & Resilience](#reliability--resilience)
    - [Observability & Monitoring](#observability--monitoring)
    - [Security & Governance](#security--governance)
-   - [Performance Characteristics](#performance-characteristics)
 4. [Architecture](#architecture)
 5. [Getting Started](#getting-started)
 6. [Configuration Reference](#configuration-reference)
@@ -55,7 +54,7 @@ This repository contains a Node.js service that emulates the Anthropic Claude Co
 Key highlights:
 
 - **Production-ready architecture** – 14 production hardening features including circuit breakers, load shedding, graceful shutdown, comprehensive metrics (Prometheus format), and Kubernetes-ready health checks. Minimal overhead (~7μs per request) with 140K req/sec throughput.
-- **Multi-provider support** – Works with Databricks (default), Azure-hosted Anthropic endpoints, and local Ollama models; requests are normalized to each provider while returning Claude-flavored responses.
+- **Multi-provider support** – Works with Databricks (default), Azure-hosted Anthropic endpoints, OpenRouter (100+ models), and local Ollama models; requests are normalized to each provider while returning Claude-flavored responses.
 - **Enterprise observability** – Real-time metrics collection, structured logging with request ID correlation, latency percentiles (p50, p95, p99), token usage tracking, and cost attribution. Multiple export formats (JSON, Prometheus).
 - **Resilience & reliability** – Exponential backoff with jitter for retries, circuit breaker protection against cascading failures, automatic load shedding during overload, and zero-downtime deployments via graceful shutdown.
 - **Workspace awareness** – Local repo indexing, `CLAUDE.md` summaries, language-aware navigation, and Git helpers mirror core Claude Code workflows.
@@ -65,7 +64,7 @@ Key highlights:
 
 The result is a production-ready, self-hosted alternative that stays close to Anthropic's ergonomics while providing enterprise-grade reliability, observability, and performance.
 
-> **Compatibility note:** Claude models hosted on Databricks work out of the box. Set `MODEL_PROVIDER=azure-anthropic` (and related credentials) to target the Azure-hosted Anthropic `/anthropic/v1/messages` endpoint. Set `MODEL_PROVIDER=ollama` to use locally-running Ollama models (qwen2.5-coder, llama3, mistral, etc.).
+> **Compatibility note:** Claude models hosted on Databricks work out of the box. Set `MODEL_PROVIDER=azure-anthropic` (and related credentials) to target the Azure-hosted Anthropic `/anthropic/v1/messages` endpoint. Set `MODEL_PROVIDER=openrouter` to access 100+ models through OpenRouter (GPT-4o, Claude, Gemini, etc.). Set `MODEL_PROVIDER=ollama` to use locally-running Ollama models (qwen2.5-coder, llama3, mistral, etc.).
 
 Further documentation and usage notes are available on [DeepWiki](https://deepwiki.com/vishalveerareddy123/Lynkr).
 
@@ -96,7 +95,15 @@ Further documentation and usage notes are available on [DeepWiki](https://deepwi
 
 ### Execution & Tooling
 
-- Tool execution pipeline sandboxes or runs tools in the host workspace based on policy.
+- **Flexible tool execution modes**: Configure where tools execute via `TOOL_EXECUTION_MODE`:
+  - `server` (default) – Tools run on the proxy server where Lynkr is hosted
+  - `client`/`passthrough` – Tools execute on the Claude Code CLI side, enabling local file operations and commands on the client machine
+- **Client-side tool execution** – When in passthrough mode, the proxy returns Anthropic-formatted `tool_use` blocks to the CLI, which executes them locally and sends back `tool_result` blocks. This enables:
+  - File operations on the CLI user's local filesystem
+  - Local command execution in the user's environment
+  - Access to local credentials and SSH keys
+  - Integration with local development tools
+- Tool execution pipeline sandboxes or runs tools in the host workspace based on policy (server mode).
 - MCP sandbox orchestration (Docker runtime by default) optionally isolates external tools with mount and permission controls.
 - Automated testing harness exposes `workspace_test_run`, `workspace_test_history`, and `workspace_test_summary`.
 - Prompt caching reduces repeated token usage for iterative conversations.
@@ -213,43 +220,7 @@ Lynkr includes comprehensive production-ready features designed for reliability,
 - Cost tracking and budget exhaustion handling
 - Request-level cost attribution
 
-### Performance Characteristics
 
-#### **Benchmark Results**
-Based on comprehensive performance testing with 100,000+ operations:
-
-| Component | Throughput | Latency | Overhead |
-|-----------|------------|---------|----------|
-| Baseline (no-op) | 21.3M ops/sec | 0.00005ms | - |
-| Metrics Collection | 4.7M ops/sec | 0.0002ms | 0.15ms |
-| Load Shedding Check | 7.6M ops/sec | 0.0001ms | 0.08ms |
-| Circuit Breaker | 4.3M ops/sec | 0.0002ms | 0.18ms |
-| Input Validation (simple) | 5.8M ops/sec | 0.0002ms | 0.12ms |
-| Input Validation (complex) | 890K ops/sec | 0.0011ms | 0.96ms |
-| Combined Middleware Stack | 140K ops/sec | 0.0071ms | 7.1μs |
-
-**Overall Performance Rating:** ⭐ **EXCELLENT**
-- Total middleware overhead: **7.1 microseconds** per request
-- Throughput: **140,000 requests/second**
-- Memory overhead: **~4MB** for typical workload
-
-#### **Production Deployment Metrics**
-- **Test Coverage:** 80 comprehensive tests with 100% pass rate
-- **Feature Completeness:** 14/14 production features implemented
-- **Zero-downtime Deployments:** Supported via graceful shutdown
-- **Horizontal Scaling:** Stateless design enables unlimited horizontal scaling
-- **Vertical Scaling:** Efficient resource usage supports high request volumes
-
-#### **Scalability Profile**
-- Single instance handles 140K req/sec under test conditions
-- Linear scaling with additional instances (no shared state)
-- Memory usage: ~100MB baseline + ~4MB per 10K active requests
-- CPU usage: <5% per core at moderate load
-- Network: Limited by backend API latency, not proxy overhead
-
-For detailed performance analysis, benchmarks, and deployment guidance, see [PERFORMANCE-REPORT.md](PERFORMANCE-REPORT.md).
-
----
 
 ## Architecture
 
@@ -301,22 +272,23 @@ For detailed performance analysis, benchmarks, and deployment guidance, see [PER
 │ MCP Registry   │          │ Provider Adapters              │      │ Sandbox      │
 │ (manifest ->   │──RPC─────│ • Databricks (circuit-breaker) │──┐   │ Runtime      │
 │ JSON-RPC client│          │ • Azure Anthropic (retry logic)│  │   │ (Docker)     │
-└────────────────┘          │ • Ollama (local models)        │  │   └──────────────┘
+└────────────────┘          │ • OpenRouter (100+ models)     │  │   └──────────────┘
+                            │ • Ollama (local models)        │  │
                             │ • HTTP Connection Pooling      │  │
                             │ • Exponential Backoff + Jitter │  │
                             └────────────┬───────────────────┘  │
                                          │                      │
-                        ┌────────────────┼────────────┐         │
-                        │                │            │         │
-              ┌─────────▼────────┐  ┌───▼────────┐  ┌▼─────────────┐
-              │ Databricks       │  │ Azure      │  │ Ollama API   │───────┘
-              │ Serving Endpoint │  │ Anthropic  │  │ (localhost)  │
-              │ (REST)           │  │ /anthropic │  │ qwen2.5-coder│
-              └──────────────────┘  │ /v1/messages│  └──────────────┘
-                                    └────────────┘
-                                         │
-                                ┌────────▼──────────┐
-                                │ External MCP tools│
+                        ┌────────────────┼─────────────────┐    │
+                        │                │                 │    │
+              ┌─────────▼────────┐  ┌───▼────────┐  ┌─────▼─────────┐
+              │ Databricks       │  │ Azure      │  │ OpenRouter API│
+              │ Serving Endpoint │  │ Anthropic  │  │ (GPT-4o, etc.)│
+              │ (REST)           │  │ /anthropic │  └───────────────┘
+              └──────────────────┘  │ /v1/messages│  ┌──────────────┐
+                                    └────────────┘  │ Ollama API   │───────┘
+                                         │          │ (localhost)  │
+                                ┌────────▼──────────│ qwen2.5-coder│
+                                │ External MCP tools└──────────────┘
                                 │ (GitHub, Jira)    │
                                 └───────────────────┘
 ```
@@ -491,6 +463,7 @@ Set `MODEL_PROVIDER` to select the upstream endpoint:
 
 - `MODEL_PROVIDER=databricks` (default) – expects `DATABRICKS_API_BASE`, `DATABRICKS_API_KEY`, and optionally `DATABRICKS_ENDPOINT_PATH`.
 - `MODEL_PROVIDER=azure-anthropic` – routes requests to Azure's `/anthropic/v1/messages` endpoint and uses the headers Azure expects.
+- `MODEL_PROVIDER=openrouter` – connects to OpenRouter for access to 100+ models (GPT-4o, Claude, Gemini, Llama, etc.). Requires `OPENROUTER_API_KEY`.
 - `MODEL_PROVIDER=ollama` – connects to a locally-running Ollama instance for models like qwen2.5-coder, llama3, mistral, etc.
 
 **Azure-hosted Anthropic configuration:**
@@ -529,6 +502,42 @@ ollama pull qwen2.5-coder:latest
 ollama list
 ```
 
+**OpenRouter configuration:**
+
+OpenRouter provides unified access to 100+ AI models through a single API, including GPT-4o, Claude, Gemini, Llama, Mixtral, and more. It offers competitive pricing, automatic fallbacks, and no need to manage multiple API keys.
+
+```env
+MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-...                                    # Get from https://openrouter.ai/keys
+OPENROUTER_MODEL=openai/gpt-4o-mini                                # Model to use (see https://openrouter.ai/models)
+OPENROUTER_ENDPOINT=https://openrouter.ai/api/v1/chat/completions  # API endpoint
+PORT=8080
+WORKSPACE_ROOT=/path/to/your/repo
+```
+
+**Popular OpenRouter models:**
+- `openai/gpt-4o-mini` – Fast, affordable GPT-4o mini ($0.15/$0.60 per 1M tokens)
+- `anthropic/claude-3.5-sonnet` – Claude 3.5 Sonnet for complex reasoning
+- `google/gemini-pro-1.5` – Google's Gemini Pro with large context
+- `meta-llama/llama-3.1-70b-instruct` – Meta's open-source Llama 3.1
+
+See https://openrouter.ai/models for the complete list with pricing.
+
+**Getting an OpenRouter API key:**
+1. Visit https://openrouter.ai
+2. Sign in with GitHub, Google, or email
+3. Go to https://openrouter.ai/keys
+4. Create a new API key
+5. Add credits to your account (pay-as-you-go, no subscription required)
+
+**OpenRouter benefits:**
+- ✅ **100+ models** through one API (no need to manage multiple provider accounts)
+- ✅ **Automatic fallbacks** if your primary model is unavailable
+- ✅ **Competitive pricing** with volume discounts
+- ✅ **Full tool calling support** (function calling compatible with Claude Code CLI)
+- ✅ **No monthly fees** – pay only for what you use
+- ✅ **Rate limit pooling** across models
+
 ---
 
 ## Configuration Reference
@@ -537,7 +546,7 @@ ollama list
 |----------|-------------|---------|
 | `PORT` | HTTP port for the proxy server. | `8080` |
 | `WORKSPACE_ROOT` | Filesystem path exposed to workspace tools and indexer. | `process.cwd()` |
-| `MODEL_PROVIDER` | Selects the model backend (`databricks`, `azure-anthropic`, `ollama`). | `databricks` |
+| `MODEL_PROVIDER` | Selects the model backend (`databricks`, `azure-anthropic`, `openrouter`, `ollama`). | `databricks` |
 | `MODEL_DEFAULT` | Overrides the default model/deployment name sent to the provider. | Provider-specific default |
 | `DATABRICKS_API_BASE` | Base URL of your Databricks workspace (required when `MODEL_PROVIDER=databricks`). | – |
 | `DATABRICKS_API_KEY` | Databricks PAT used for the serving endpoint (required for Databricks). | – |
@@ -545,12 +554,17 @@ ollama list
 | `AZURE_ANTHROPIC_ENDPOINT` | Full HTTPS endpoint for Azure-hosted Anthropic `/anthropic/v1/messages` (required when `MODEL_PROVIDER=azure-anthropic`). | – |
 | `AZURE_ANTHROPIC_API_KEY` | API key supplied via the `x-api-key` header for Azure Anthropic. | – |
 | `AZURE_ANTHROPIC_VERSION` | Anthropic API version header for Azure Anthropic calls. | `2023-06-01` |
+| `OPENROUTER_API_KEY` | OpenRouter API key (required when `MODEL_PROVIDER=openrouter`). Get from https://openrouter.ai/keys | – |
+| `OPENROUTER_MODEL` | OpenRouter model to use (e.g., `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`). See https://openrouter.ai/models | `openai/gpt-4o-mini` |
+| `OPENROUTER_ENDPOINT` | OpenRouter API endpoint URL. | `https://openrouter.ai/api/v1/chat/completions` |
+| `OPENROUTER_MAX_TOOLS_FOR_ROUTING` | Maximum tool count for routing to OpenRouter in hybrid mode. | `15` |
 | `OLLAMA_ENDPOINT` | Ollama API endpoint URL (required when `MODEL_PROVIDER=ollama`). | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Ollama model name to use (e.g., `qwen2.5-coder:latest`, `llama3`, `mistral`). | `qwen2.5-coder:7b` |
 | `OLLAMA_TIMEOUT_MS` | Request timeout for Ollama API calls in milliseconds. | `120000` (2 minutes) |
 | `PROMPT_CACHE_ENABLED` | Toggle the prompt cache system. | `true` |
 | `PROMPT_CACHE_TTL_MS` | Milliseconds before cached prompts expire. | `300000` (5 minutes) |
 | `PROMPT_CACHE_MAX_ENTRIES` | Maximum number of cached prompts retained. | `64` |
+| `TOOL_EXECUTION_MODE` | Controls where tools execute: `server` (default, tools run on proxy server), `client`/`passthrough` (tools execute on Claude Code CLI side). | `server` |
 | `POLICY_MAX_STEPS` | Max agent loop iterations before timeout. | `8` |
 | `POLICY_GIT_ALLOW_PUSH` | Allow/disallow `workspace_git_push`. | `false` |
 | `POLICY_GIT_REQUIRE_TESTS` | Enforce passing tests before `workspace_git_commit`. | `false` |
@@ -648,12 +662,6 @@ Lynkr works with any Ollama model. Popular choices:
 - **mistral:latest** – Fast, efficient model (7B parameters, 4.1GB)
 - **codellama:latest** – Meta's code-focused model (7B-34B variants)
 
-**Performance Characteristics:**
-
-- **Latency**: ~100-500ms first token (depending on model size and hardware)
-- **Throughput**: ~20-50 tokens/sec on M1/M2 Macs, ~10-30 tokens/sec on typical CPUs
-- **Memory**: 8GB RAM minimum recommended for 7B models, 16GB for 13B models
-- **Disk**: 4-10GB per model (quantized)
 
 **Ollama Health Check:**
 
@@ -683,14 +691,15 @@ See [OLLAMA-TOOL-CALLING.md](OLLAMA-TOOL-CALLING.md) for implementation details.
 
 ### Hybrid Routing with Automatic Fallback
 
-Lynkr supports **intelligent hybrid routing** that automatically routes requests between Ollama (local/fast) and cloud providers (Databricks/Azure) based on request complexity, with transparent fallback when Ollama is unavailable.
+Lynkr supports **intelligent 3-tier hybrid routing** that automatically routes requests between Ollama (local/fast), OpenRouter (moderate complexity), and cloud providers (Databricks/Azure for heavy workloads) based on request complexity, with transparent fallback when any provider is unavailable.
 
 **Why Hybrid Routing?**
 
 - 🚀 **40-87% faster** for simple requests (local Ollama)
 - 💰 **65-100% cost savings** for requests that stay on Ollama
-- 🛡️ **Automatic fallback** ensures reliability when Ollama fails
-- 🔒 **Privacy-preserving** for simple queries (never leave your machine)
+- 🎯 **Smart cost optimization** – use affordable OpenRouter models for moderate complexity
+- 🛡️ **Automatic fallback** ensures reliability when any provider fails
+- 🔒 **Privacy-preserving** for simple queries (never leave your machine with Ollama)
 
 **Quick Start:**
 
@@ -699,12 +708,14 @@ Lynkr supports **intelligent hybrid routing** that automatically routes requests
 ollama serve
 ollama pull qwen2.5-coder:latest
 
-# Terminal 2: Start Lynkr with hybrid routing
+# Terminal 2: Start Lynkr with 3-tier routing
 export PREFER_OLLAMA=true
 export OLLAMA_ENDPOINT=http://localhost:11434
 export OLLAMA_MODEL=qwen2.5-coder:latest
-export DATABRICKS_API_KEY=your_key           # Fallback provider
-export DATABRICKS_API_BASE=your_base_url     # Fallback provider
+export OPENROUTER_API_KEY=your_openrouter_key    # Mid-tier provider
+export OPENROUTER_MODEL=openai/gpt-4o-mini       # Mid-tier model
+export DATABRICKS_API_KEY=your_key               # Heavy workload provider
+export DATABRICKS_API_BASE=your_base_url         # Heavy workload provider
 npm start
 
 # Terminal 3: Connect Claude CLI (works transparently)
@@ -715,16 +726,22 @@ claude
 
 **How It Works:**
 
-Lynkr intelligently routes each request:
+Lynkr intelligently routes each request based on complexity:
 
 1. **Simple requests (0-2 tools)** → Try Ollama first
-   - ✅ If Ollama succeeds: Fast, local response (100-500ms)
-   - ❌ If Ollama fails: Automatic transparent fallback to cloud
+   - ✅ If Ollama succeeds: Fast, local, free response (100-500ms)
+   - ❌ If Ollama fails: Automatic transparent fallback to OpenRouter or Databricks
 
-2. **Complex requests (3+ tools)** → Route directly to cloud
-   - Ollama isn't attempted (saves time on requests better suited for cloud)
+2. **Moderate requests (3-14 tools)** → Route to OpenRouter
+   - Uses affordable models like GPT-4o-mini ($0.15/1M input tokens)
+   - Full tool calling support
+   - ❌ If OpenRouter fails or not configured: Fallback to Databricks
 
-3. **Tool-incompatible models** → Route directly to cloud
+3. **Complex requests (15+ tools)** → Route directly to Databricks
+   - Heavy workloads get the most capable models
+   - Enterprise features and reliability
+
+4. **Tool-incompatible models** → Route directly to cloud
    - Requests requiring tools with non-tool-capable Ollama models skip Ollama
 
 **Configuration:**
@@ -734,9 +751,12 @@ Lynkr intelligently routes each request:
 PREFER_OLLAMA=true                    # Enable hybrid routing mode
 
 # Optional (with defaults)
-OLLAMA_FALLBACK_ENABLED=true          # Enable automatic fallback (default: true)
-OLLAMA_MAX_TOOLS_FOR_ROUTING=3        # Max tools to route to Ollama (default: 3)
-OLLAMA_FALLBACK_PROVIDER=databricks   # Cloud provider for fallback (default: databricks)
+FALLBACK_ENABLED=true                         # Enable automatic fallback (default: true)
+OLLAMA_MAX_TOOLS_FOR_ROUTING=3                # Max tools to route to Ollama (default: 3)
+OPENROUTER_MAX_TOOLS_FOR_ROUTING=15           # Max tools to route to OpenRouter (default: 15)
+FALLBACK_PROVIDER=databricks                  # Final fallback provider (default: databricks)
+OPENROUTER_API_KEY=your_key                   # Required for OpenRouter tier
+OPENROUTER_MODEL=openai/gpt-4o-mini           # OpenRouter model (default: gpt-4o-mini)
 ```
 
 **Example Scenarios:**
@@ -747,16 +767,23 @@ User: "Write a hello world function in Python"
 → Routes to Ollama (fast, local, free)
 → Response in ~300ms
 
-# Scenario 2: Complex workflow with multiple tools
+# Scenario 2: Moderate workflow (3-14 tools)
 User: "Search the codebase, read 5 files, and refactor them"
-→ Routes directly to cloud (5+ tools, better suited for Databricks)
-→ Response in ~2000ms
+→ Routes to OpenRouter (moderate complexity)
+→ Uses affordable GPT-4o-mini
+→ Response in ~1500ms
 
-# Scenario 3: Ollama unavailable
+# Scenario 3: Heavy workflow (15+ tools)
+User: "Analyze 20 files, run tests, update documentation, commit changes"
+→ Routes directly to Databricks (complex task needs most capable model)
+→ Response in ~2500ms
+
+# Scenario 4: Automatic fallback chain
 User: "What is 2+2?"
 → Tries Ollama (connection refused)
-→ Automatic fallback to Databricks
-→ Response in ~1500ms (user sees no error)
+→ Falls back to OpenRouter (if configured)
+→ Falls back to Databricks (if OpenRouter unavailable)
+→ User sees no error, just gets response
 ```
 
 **Circuit Breaker Protection:**
@@ -811,7 +838,7 @@ npm start
 
 # Option 2: Ollama-only mode (no fallback)
 export PREFER_OLLAMA=true
-export OLLAMA_FALLBACK_ENABLED=false
+export FALLBACK_ENABLED=false
 npm start
 ```
 
@@ -851,6 +878,69 @@ curl http://localhost:8080/v1/messages \
 ```
 
 Tool responses appear in the assistant content block with structured JSON.
+
+### Client-Side Tool Execution (Passthrough Mode)
+
+Lynkr supports **client-side tool execution**, where tools execute on the Claude Code CLI machine instead of the proxy server. This enables local file operations, commands, and access to local resources.
+
+**Enable client-side execution:**
+
+```bash
+# Set in .env or export before starting
+export TOOL_EXECUTION_MODE=client
+npm start
+```
+
+**How it works:**
+
+1. **Model generates tool calls** – Databricks/OpenRouter/Ollama model returns tool calls
+2. **Proxy converts to Anthropic format** – Tool calls converted to `tool_use` blocks
+3. **CLI executes tools locally** – Claude Code CLI receives `tool_use` blocks and runs them on the user's machine
+4. **CLI sends results back** – Tool results sent back to proxy in next request as `tool_result` blocks
+5. **Conversation continues** – Proxy forwards the complete conversation (including tool results) back to the model
+
+**Example response in passthrough mode:**
+
+```json
+{
+  "id": "msg_123",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "I'll create that file for you."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_abc",
+      "name": "Write",
+      "input": {
+        "file_path": "/tmp/test.txt",
+        "content": "Hello World"
+      }
+    }
+  ],
+  "stop_reason": "tool_use"
+}
+```
+
+**Benefits:**
+- ✅ Tools execute on CLI user's local filesystem
+- ✅ Access to local credentials, SSH keys, environment variables
+- ✅ Integration with local development tools (git, npm, docker, etc.)
+- ✅ Reduced network latency for file operations
+- ✅ Server doesn't need filesystem access or permissions
+
+**Use cases:**
+- Remote proxy server, local CLI execution
+- Multi-user environments where each user needs their own workspace
+- Security-sensitive environments where server shouldn't access user files
+
+**Supported modes:**
+- `TOOL_EXECUTION_MODE=server` – Tools run on proxy server (default)
+- `TOOL_EXECUTION_MODE=client` – Tools run on CLI side
+- `TOOL_EXECUTION_MODE=passthrough` – Alias for `client`
 
 ### Working with Prompt Caching
 
@@ -1095,7 +1185,8 @@ Replace `<workspace>` and `<endpoint-name>` with your Databricks workspace host 
 
 - **Databricks** – Mirrors Anthropic's hosted behaviour. Automatic policy web fallbacks (`needsWebFallback`) can trigger an extra `web_fetch`, and the upstream service executes dynamic pages on your behalf.
 - **Azure Anthropic** – Requests are normalised to Azure's payload shape. The proxy disables automatic `web_fetch` fallbacks to avoid duplicate tool executions; instead, the assistant surfaces a diagnostic message and you can trigger the tool manually if required.
-- **Ollama** – Connects to locally-running Ollama models. Tool definitions are filtered out since Ollama doesn't support native tool calling. System prompts are merged into the first user message. Response format is converted from Ollama's format to Anthropic-compatible content blocks. Best used for simple text generation tasks or as a cost-effective development environment.
+- **OpenRouter** – Connects to OpenRouter's unified API for access to 100+ models. Full tool calling support with automatic format conversion between Anthropic and OpenAI formats. Messages are converted to OpenAI's format, tool calls are properly translated, and responses are converted back to Anthropic-compatible format. Best used for cost optimization, model flexibility, or when you want to experiment with different models without changing your codebase.
+- **Ollama** – Connects to locally-running Ollama models. Tool support varies by model (llama3.1, qwen2.5, mistral support tools; llama3 and older models don't). System prompts are merged into the first user message. Response format is converted from Ollama's format to Anthropic-compatible content blocks. Best used for simple text generation tasks, offline development, or as a cost-effective development environment.
 - In all cases, `web_search` and `web_fetch` run locally. They do not execute JavaScript, so pages that render data client-side (Google Finance, etc.) will return scaffolding only. Prefer JSON/CSV quote APIs (e.g. Yahoo chart API) when you need live financial data.
 
 ---
@@ -1143,6 +1234,15 @@ Replace `<workspace>` and `<endpoint-name>` with your Databricks workspace host 
 - **Claude CLI prompts for missing tools** – Verify `tools` array in the client request lists the functions you expect. The proxy only exposes registered handlers.
 - **Dynamic finance pages return stale data** – `web_fetch` fetches static HTML only. Use an API endpoint (e.g. Yahoo Finance chart JSON) or the Databricks-hosted tooling if you need rendered values from heavily scripted pages.
 
+### OpenRouter Issues
+
+- **"No choices in OpenRouter response" errors** – OpenRouter sometimes returns error responses (rate limits, model unavailable) with JSON but no `choices` array. As of the latest update, Lynkr gracefully handles these errors and returns proper error responses instead of crashing. Check logs for "OpenRouter response missing choices array" warnings to see the full error details.
+- **Multi-prompt behavior with certain models** – Some OpenRouter models (particularly open-source models like `openai/gpt-oss-120b`) may be overly cautious and ask for confirmation multiple times before executing tools. This is model-specific behavior. Consider switching to:
+  - `anthropic/claude-3.5-sonnet` – More decisive tool execution
+  - `openai/gpt-4o` or `openai/gpt-4o-mini` – Better tool calling behavior
+  - Use Databricks provider with Claude models for optimal tool execution
+- **Rate limit errors** – OpenRouter applies per-model rate limits. If you hit limits frequently, check your OpenRouter dashboard for current usage and consider upgrading your plan or spreading requests across multiple models.
+
 ### Production Hardening Issues
 
 - **503 Service Unavailable errors during normal load** – Check load shedding thresholds (`LOAD_SHEDDING_*`). Lower values may trigger too aggressively. Check `/metrics/observability` for memory usage patterns.
@@ -1183,9 +1283,9 @@ If performance is degraded:
 
 ## Roadmap & Known Gaps
 
-### ✅ Recently Completed (Production Hardening)
+### ✅ Recently Completed
 
-All 14 production hardening features have been implemented and tested with 100% pass rate:
+**Production Hardening (All 14 features implemented with 100% pass rate):**
 - ✅ Exponential backoff with jitter retry logic
 - ✅ Circuit breaker pattern for external services
 - ✅ Load shedding with resource monitoring
@@ -1201,7 +1301,11 @@ All 14 production hardening features have been implemented and tested with 100% 
 - ✅ Rate limiting capabilities
 - ✅ Safe command DSL
 
-Performance verified: 7.1μs overhead, 140K req/sec throughput. See [PERFORMANCE-REPORT.md](PERFORMANCE-REPORT.md) for details.
+
+**Latest Features (December 2025):**
+- ✅ **Client-side tool execution** (`TOOL_EXECUTION_MODE=client/passthrough`) – Tools can now execute on the Claude Code CLI side instead of the server, enabling local file operations, local commands, and access to local credentials
+- ✅ **OpenRouter error resilience** – Graceful handling of malformed OpenRouter responses (missing `choices` array), preventing crashes during rate limits or service errors
+- ✅ **Enhanced format conversion** – Improved Anthropic ↔ OpenRouter format conversion for tool calls, ensuring proper `tool_use` block generation and session consistency across providers
 
 ### 🔮 Future Enhancements
 
@@ -1224,7 +1328,7 @@ A: Functionally they overlap on core workflows (chat, tool calls, repo ops), but
 
 | Capability | Anthropic Hosted Backend | Claude Code Proxy |
 |------------|-------------------------|-------------------|
-| Claude models | Anthropic-operated Sonnet/Opus | Adapters for Databricks (default), Azure Anthropic, and Ollama (local models) |
+| Claude models | Anthropic-operated Sonnet/Opus | Adapters for Databricks (default), Azure Anthropic, OpenRouter (100+ models), and Ollama (local models) |
 | Prompt cache | Managed, opaque | Local LRU cache with configurable TTL/size |
 | Git & workspace tools | Anthropic-managed hooks | Local Node handlers (`src/tools/`) with policy gate |
 | Web search/fetch | Hosted browsing agent, JS-capable | Local HTTP fetch (no JS) plus optional policy fallback |
@@ -1252,7 +1356,50 @@ A: Yes! Set `MODEL_PROVIDER=ollama` and ensure Ollama is running locally (`ollam
 A: For code generation, use `qwen2.5-coder:latest` (7B, optimized for code). For general conversations, `llama3:latest` (8B) or `mistral:latest` (7B) work well. Larger models (13B+) provide better quality but require more RAM and are slower.
 
 **Q: What are the performance differences between providers?**
-A: **Databricks/Azure Anthropic**: ~500ms-2s latency, cloud-hosted, pay-per-token, supports tools. **Ollama**: ~100-500ms first token, runs locally, free, no tool support. Choose Databricks/Azure for production workflows with tools; choose Ollama for fast iteration, offline development, or cost optimization.
+A:
+- **Databricks/Azure Anthropic**: ~500ms-2s latency, cloud-hosted, pay-per-token, full tool support, enterprise features
+- **OpenRouter**: ~300ms-1.5s latency, cloud-hosted, competitive pricing ($0.15/1M for GPT-4o-mini), 100+ models, full tool support
+- **Ollama**: ~100-500ms first token, runs locally, free, limited tool support (model-dependent)
+
+Choose Databricks/Azure for enterprise production with guaranteed SLAs. Choose OpenRouter for flexibility, cost optimization, and access to multiple models. Choose Ollama for fast iteration, offline development, or maximum cost savings.
+
+**Q: What is OpenRouter and why should I use it?**
+A: OpenRouter is a unified API gateway that provides access to 100+ AI models from multiple providers (OpenAI, Anthropic, Google, Meta, Mistral, etc.) through a single API key. Benefits include:
+- **No vendor lock-in**: Switch models without changing your code
+- **Competitive pricing**: Often cheaper than going directly to providers (e.g., GPT-4o-mini at $0.15/$0.60 per 1M tokens)
+- **Automatic fallbacks**: If your primary model is unavailable, OpenRouter can automatically try alternatives
+- **No monthly fees**: Pay-as-you-go with no subscription required
+- **Full tool calling support**: Compatible with Claude Code CLI workflows
+
+**Q: How do I get started with OpenRouter?**
+A:
+1. Visit https://openrouter.ai and sign in (GitHub, Google, or email)
+2. Go to https://openrouter.ai/keys and create an API key
+3. Add credits to your account (minimum $5, pay-as-you-go)
+4. Configure Lynkr:
+```env
+MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
+```
+5. Start Lynkr and connect Claude CLI
+
+**Q: Which OpenRouter model should I use?**
+A: Popular choices:
+- **Budget-conscious**: `openai/gpt-4o-mini` ($0.15/$0.60 per 1M) – Best value for code tasks
+- **Best quality**: `anthropic/claude-3.5-sonnet` – Claude's most capable model
+- **Free tier**: `meta-llama/llama-3.1-8b-instruct:free` – Completely free (rate-limited)
+- **Balanced**: `google/gemini-pro-1.5` – Large context window, good performance
+
+See https://openrouter.ai/models for the complete list with pricing and features.
+
+**Q: Can I use OpenRouter with the 3-tier hybrid routing?**
+A: Yes! The recommended configuration uses:
+- **Tier 1 (0-2 tools)**: Ollama (free, local, fast)
+- **Tier 2 (3-14 tools)**: OpenRouter (affordable, full tool support)
+- **Tier 3 (15+ tools)**: Databricks (most capable, enterprise features)
+
+This gives you the best of all worlds: free for simple tasks, affordable for moderate complexity, and enterprise-grade for heavy workloads.
 
 **Q: Where are session transcripts stored?**
 A: In SQLite at `data/sessions.db` (configurable via `SESSION_DB_PATH`).
@@ -1275,27 +1422,20 @@ A: Lynkr collects request counts, error rates, latency percentiles (p50, p95, p9
 - `/metrics/circuit-breakers` - Circuit breaker state
 
 **Q: Is Lynkr production-ready?**
-A: Yes.  Excellent performance (140K req/sec), and comprehensive observability, Lynkr is designed for production deployments. It supports:
+A: Yes.  Excellent performance , and comprehensive observability, Lynkr is designed for production deployments. It supports:
 - Zero-downtime deployments (graceful shutdown)
 - Kubernetes integration (health checks, metrics)
 - Horizontal scaling (stateless design)
 - Enterprise monitoring (Prometheus, Grafana)
 
-**Q: What's the performance impact of production features?**
-A: Minimal. Comprehensive benchmarking shows:
-- Total middleware overhead: 7.1 microseconds per request
-- Throughput: 140,000 requests/second
-- Memory overhead: ~4MB for typical workload
 
-This is considered "EXCELLENT" performance - the overhead is negligible compared to network and API latency.
 
 **Q: How do I deploy Lynkr to Kubernetes?**
 A: Use the included Kubernetes configurations and Docker support. Key steps:
 1. Build Docker image: `docker build -t lynkr .`
 2. Configure environment variables in Kubernetes secrets
-3. Deploy with health checks (see examples in [PERFORMANCE-REPORT.md](PERFORMANCE-REPORT.md))
-4. Configure Prometheus scraping for metrics
-5. Set up Grafana dashboards for visualization
+3. Configure Prometheus scraping for metrics
+4. Set up Grafana dashboards for visualization
 
 The graceful shutdown and health check endpoints ensure zero-downtime deployments.
 

@@ -25,6 +25,7 @@ function determineProvider(payload) {
   // Count tools in request
   const toolCount = Array.isArray(payload?.tools) ? payload.tools.length : 0;
   const maxToolsForOllama = config.modelProvider?.ollamaMaxToolsForRouting ?? 3;
+  const maxToolsForOpenRouter = config.modelProvider?.openRouterMaxToolsForRouting ?? 15;
 
   // Check if Ollama model supports tools when tools are present
   if (toolCount > 0) {
@@ -33,7 +34,7 @@ function determineProvider(payload) {
 
     // Only route to fallback if it's enabled AND model doesn't support tools
     if (!supportsTools && isFallbackEnabled()) {
-      const fallback = config.modelProvider?.ollamaFallbackProvider ?? "databricks";
+      const fallback = config.modelProvider?.fallbackProvider ?? "databricks";
       logger.debug(
         { toolCount, ollamaModel, supportsTools: false, decision: fallback },
         "Routing to cloud (model doesn't support tools)"
@@ -51,12 +52,21 @@ function determineProvider(payload) {
     return "ollama";
   }
 
-  // Complex requests → cloud (only if fallback is enabled)
-  if (isFallbackEnabled()) {
-    const fallback = config.modelProvider?.ollamaFallbackProvider ?? "databricks";
+  // Moderate tool count → OpenRouter (if configured and fallback enabled)
+  if (toolCount < maxToolsForOpenRouter && isFallbackEnabled() && config.openrouter?.apiKey) {
     logger.debug(
-      { toolCount, maxToolsForOllama, decision: fallback },
-      "Routing to cloud (complex request)"
+      { toolCount, maxToolsForOllama, maxToolsForOpenRouter, decision: "openrouter" },
+      "Routing to OpenRouter (moderate tools)"
+    );
+    return "openrouter";
+  }
+
+  // Heavy tool count → cloud (only if fallback is enabled)
+  if (isFallbackEnabled()) {
+    const fallback = config.modelProvider?.fallbackProvider ?? "databricks";
+    logger.debug(
+      { toolCount, maxToolsForOpenRouter, decision: fallback },
+      "Routing to cloud (heavy tools)"
     );
     return fallback;
   }
@@ -75,7 +85,7 @@ function determineProvider(payload) {
  * @returns {boolean} True if fallback is enabled
  */
 function isFallbackEnabled() {
-  return config.modelProvider?.ollamaFallbackEnabled !== false;
+  return config.modelProvider?.fallbackEnabled !== false;
 }
 
 /**
@@ -84,7 +94,7 @@ function isFallbackEnabled() {
  * @returns {string} Fallback provider name (e.g., "databricks", "azure-anthropic")
  */
 function getFallbackProvider() {
-  return config.modelProvider?.ollamaFallbackProvider ?? "databricks";
+  return config.modelProvider?.fallbackProvider ?? "databricks";
 }
 
 module.exports = {

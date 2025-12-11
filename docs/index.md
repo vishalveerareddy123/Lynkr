@@ -55,8 +55,11 @@ Emulates Anthropic’s backend so the **Claude Code CLI works without modificati
 ### ✔ Works with Databricks LLM Serving  
 Supports **Databricks-hosted Claude Sonnet / Haiku models**, or any LLM served from Databricks.
 
-### ✔ Supports Azure Anthropic models  
-Route Claude Code requests into Azure’s `/anthropic/v1/messages` endpoint.
+### ✔ Supports Azure Anthropic models
+Route Claude Code requests into Azure's `/anthropic/v1/messages` endpoint.
+
+### ✔ Supports OpenRouter (100+ models)
+Access GPT-4o, Claude, Gemini, Llama, and more through a single unified API with full tool calling support.
 
 ### ✔ Full Model Context Protocol (MCP) integration  
 Auto-discovers MCP manifests and exposes them as tools for smart workflows.
@@ -70,10 +73,13 @@ Commit, push, diff, stage, generate release notes, etc.
 ### ✔ Prompt Caching (LRU + TTL)  
 Reuses identical prompts to reduce cost + latency.
 
-### ✔ Workspace Tools  
+### ✔ Workspace Tools
 Task tracker, file I/O, test runner, index rebuild, etc.
 
-### ✔ Fully extensible Node.js architecture  
+### ✔ Client-Side Tool Execution (Passthrough Mode)
+Tools can execute on the Claude Code CLI side instead of the server, enabling local file operations and commands.
+
+### ✔ Fully extensible Node.js architecture
 Add custom tools, policies, or backend adapters.
 
 ---
@@ -89,6 +95,7 @@ Add custom tools, policies, or backend adapters.
 - [Prompt Caching](#-prompt-caching)
 - [MCP (Model Context Protocol) Integration](#-model-context-protocol-mcp)
 - [Git Tools](#-git-tools)
+- [Client-Side Tool Execution (Passthrough Mode)](#-client-side-tool-execution-passthrough-mode)
 - [API Examples](#-api-examples)
 - [Roadmap](#-roadmap)
 - [Links](#-links)
@@ -213,6 +220,43 @@ WORKSPACE_ROOT=/path/to/repo
 PORT=8080
 ```
 
+## OpenRouter Setup
+
+**What is OpenRouter?**
+
+OpenRouter provides unified access to 100+ AI models (GPT-4o, Claude, Gemini, Llama, etc.) through a single API. Benefits:
+- ✅ No vendor lock-in - switch models without code changes
+- ✅ Competitive pricing ($0.15/$0.60 per 1M for GPT-4o-mini)
+- ✅ Automatic fallbacks if primary model unavailable
+- ✅ Pay-as-you-go, no monthly fees
+- ✅ Full tool calling support
+
+**Configuration:**
+
+```env
+MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-...                                    # Get from https://openrouter.ai/keys
+OPENROUTER_MODEL=openai/gpt-4o-mini                                # See https://openrouter.ai/models
+OPENROUTER_ENDPOINT=https://openrouter.ai/api/v1/chat/completions
+PORT=8080
+WORKSPACE_ROOT=/path/to/your/repo
+```
+
+**Popular Models:**
+- `openai/gpt-4o-mini` – Fast, affordable ($0.15/$0.60 per 1M)
+- `anthropic/claude-3.5-sonnet` – Claude's best reasoning
+- `google/gemini-pro-1.5` – Large context window
+- `meta-llama/llama-3.1-70b-instruct` – Open-source Llama
+
+See [https://openrouter.ai/models](https://openrouter.ai/models) for complete list.
+
+**Getting Started:**
+1. Visit [https://openrouter.ai](https://openrouter.ai)
+2. Sign in with GitHub/Google/email
+3. Create API key at [https://openrouter.ai/keys](https://openrouter.ai/keys)
+4. Add credits (minimum $5)
+5. Configure Lynkr as shown above
+
 ---
 
 # 💬 Using Lynkr With Claude Code CLI
@@ -323,6 +367,47 @@ Example:
 
 ---
 
+# 🔄 Client-Side Tool Execution (Passthrough Mode)
+
+Lynkr supports **client-side tool execution**, enabling tools to execute on the Claude Code CLI machine instead of the proxy server.
+
+**Enable passthrough mode:**
+
+```bash
+export TOOL_EXECUTION_MODE=client
+npm start
+```
+
+**How it works:**
+
+1. Model generates tool calls (from Databricks/OpenRouter/Ollama)
+2. Proxy converts to Anthropic format with `tool_use` blocks
+3. Claude Code CLI receives `tool_use` blocks and executes locally
+4. CLI sends `tool_result` blocks back in the next request
+5. Proxy forwards complete conversation back to the model
+
+**Benefits:**
+
+* ✅ Local filesystem access on CLI user's machine
+* ✅ Local credentials, SSH keys, environment variables
+* ✅ Integration with local dev tools (git, npm, docker)
+* ✅ Reduced network latency for file operations
+* ✅ Server doesn't need filesystem permissions
+
+**Use cases:**
+
+* Remote proxy server with local CLI execution
+* Multi-user environments where each needs their own workspace
+* Security-sensitive setups where server shouldn't access user files
+
+**Configuration:**
+
+* `TOOL_EXECUTION_MODE=server` – Tools run on proxy (default)
+* `TOOL_EXECUTION_MODE=client` – Tools run on CLI side
+* `TOOL_EXECUTION_MODE=passthrough` – Alias for client mode
+
+---
+
 # 🧪 API Example (Index Rebuild)
 
 ```bash
@@ -341,6 +426,14 @@ curl http://localhost:8080/v1/messages \
 ---
 
 # 🛣 Roadmap
+
+## ✅ Recently Completed (December 2025)
+
+* **Client-side tool execution** (`TOOL_EXECUTION_MODE=client/passthrough`) – Tools can execute on the Claude Code CLI side, enabling local file operations, commands, and access to local credentials
+* **OpenRouter error resilience** – Graceful handling of malformed OpenRouter responses, preventing crashes during rate limits or service errors
+* **Enhanced format conversion** – Improved Anthropic ↔ OpenRouter format conversion for tool calls with proper `tool_use` block generation
+
+## 🔮 Future Features
 
 * LSP integration (TypeScript, Python, more languages)
 * Per-file diff comments

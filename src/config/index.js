@@ -62,7 +62,7 @@ function resolveConfigPath(targetPath) {
   return path.resolve(normalised);
 }
 
-const SUPPORTED_MODEL_PROVIDERS = new Set(["databricks", "azure-anthropic", "ollama"]);
+const SUPPORTED_MODEL_PROVIDERS = new Set(["databricks", "azure-anthropic", "ollama", "openrouter"]);
 const rawModelProvider = (process.env.MODEL_PROVIDER ?? "databricks").toLowerCase();
 const modelProvider = SUPPORTED_MODEL_PROVIDERS.has(rawModelProvider)
   ? rawModelProvider
@@ -79,17 +79,40 @@ const ollamaEndpoint = process.env.OLLAMA_ENDPOINT ?? "http://localhost:11434";
 const ollamaModel = process.env.OLLAMA_MODEL ?? "qwen2.5-coder:7b";
 const ollamaTimeout = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS ?? "120000", 10);
 
+// OpenRouter configuration
+const openRouterApiKey = process.env.OPENROUTER_API_KEY ?? null;
+const openRouterModel = process.env.OPENROUTER_MODEL ?? "openai/gpt-4o-mini";
+const openRouterEndpoint = process.env.OPENROUTER_ENDPOINT ?? "https://openrouter.ai/api/v1/chat/completions";
+
 // Hybrid routing configuration
 const preferOllama = process.env.PREFER_OLLAMA === "true";
-const ollamaFallbackEnabled = process.env.OLLAMA_FALLBACK_ENABLED !== "false"; // default true
+const fallbackEnabled = process.env.FALLBACK_ENABLED !== "false"; // default true
 const ollamaMaxToolsForRouting = Number.parseInt(
   process.env.OLLAMA_MAX_TOOLS_FOR_ROUTING ?? "3",
   10
 );
-const ollamaFallbackProvider = (process.env.OLLAMA_FALLBACK_PROVIDER ?? "databricks").toLowerCase();
+const openRouterMaxToolsForRouting = Number.parseInt(
+  process.env.OPENROUTER_MAX_TOOLS_FOR_ROUTING ?? "15",
+  10
+);
+const fallbackProvider = (process.env.FALLBACK_PROVIDER ?? "databricks").toLowerCase();
 
+// Tool execution mode: server (default), client, or passthrough
+const toolExecutionMode = (process.env.TOOL_EXECUTION_MODE ?? "server").toLowerCase();
+if (!["server", "client", "passthrough"].includes(toolExecutionMode)) {
+  throw new Error(
+    "TOOL_EXECUTION_MODE must be one of: server, client, passthrough (default: server)"
+  );
+}
+
+// Only require Databricks credentials if it's the primary provider or used as fallback
 if (modelProvider === "databricks" && (!rawBaseUrl || !apiKey)) {
   throw new Error("Set DATABRICKS_API_BASE and DATABRICKS_API_KEY before starting the proxy.");
+} else if (modelProvider === "ollama" && fallbackEnabled && fallbackProvider === "databricks" && (!rawBaseUrl || !apiKey)) {
+  // Relaxed: Allow mock credentials for Ollama-only testing
+  if (!rawBaseUrl) process.env.DATABRICKS_API_BASE = "http://localhost:8080";
+  if (!apiKey) process.env.DATABRICKS_API_KEY = "mock-key-for-ollama-only";
+  console.log("[CONFIG] Using mock Databricks credentials (Ollama-only mode with fallback disabled)");
 }
 
 if (modelProvider === "azure-anthropic" && (!azureAnthropicEndpoint || !azureAnthropicApiKey)) {
@@ -111,26 +134,22 @@ if (preferOllama) {
   if (!ollamaEndpoint) {
     throw new Error("PREFER_OLLAMA is set but OLLAMA_ENDPOINT is not configured");
   }
-  if (ollamaFallbackEnabled && !SUPPORTED_MODEL_PROVIDERS.has(ollamaFallbackProvider)) {
+  if (fallbackEnabled && !SUPPORTED_MODEL_PROVIDERS.has(fallbackProvider)) {
     throw new Error(
-      `OLLAMA_FALLBACK_PROVIDER must be one of: ${Array.from(SUPPORTED_MODEL_PROVIDERS).join(", ")}`
+      `FALLBACK_PROVIDER must be one of: ${Array.from(SUPPORTED_MODEL_PROVIDERS).join(", ")}`
     );
   }
-  if (ollamaFallbackEnabled && ollamaFallbackProvider === "ollama") {
-    throw new Error("OLLAMA_FALLBACK_PROVIDER cannot be 'ollama' (circular fallback)");
+  if (fallbackEnabled && fallbackProvider === "ollama") {
+    throw new Error("FALLBACK_PROVIDER cannot be 'ollama' (circular fallback)");
   }
 
-  // Ensure fallback provider is properly configured
-  if (ollamaFallbackEnabled) {
-    if (ollamaFallbackProvider === "databricks" && (!rawBaseUrl || !apiKey)) {
-      throw new Error(
-        "PREFER_OLLAMA with databricks fallback requires DATABRICKS_API_BASE and DATABRICKS_API_KEY"
-      );
+  // Ensure fallback provider is properly configured (only if fallback is enabled)
+  if (fallbackEnabled) {
+    if (fallbackProvider === "databricks" && (!rawBaseUrl || !apiKey)) {
+      console.warn("[CONFIG WARNING] Databricks fallback configured but credentials missing. Fallback will fail if needed.");
     }
-    if (ollamaFallbackProvider === "azure-anthropic" && (!azureAnthropicEndpoint || !azureAnthropicApiKey)) {
-      throw new Error(
-        "PREFER_OLLAMA with azure-anthropic fallback requires AZURE_ANTHROPIC_ENDPOINT and AZURE_ANTHROPIC_API_KEY"
-      );
+    if (fallbackProvider === "azure-anthropic" && (!azureAnthropicEndpoint || !azureAnthropicApiKey)) {
+      console.warn("[CONFIG WARNING] Azure Anthropic fallback configured but credentials missing. Fallback will fail if needed.");
     }
   }
 }
@@ -153,6 +172,12 @@ const sessionDbPath =
   process.env.SESSION_DB_PATH ?? path.join(process.cwd(), "data", "sessions.db");
 const workspaceRoot = path.resolve(process.env.WORKSPACE_ROOT ?? process.cwd());
 
+// Rate limiting configuration
+const rateLimitEnabled = process.env.RATE_LIMIT_ENABLED !== "false"; // default true
+const rateLimitWindow = Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? "60000", 10); // 1 minute
+const rateLimitMax = Number.parseInt(process.env.RATE_LIMIT_MAX ?? "100", 10); // 100 requests per window
+const rateLimitKeyBy = process.env.RATE_LIMIT_KEY_BY ?? "session"; // "session", "ip", or "both"
+
 const defaultWebEndpoint = process.env.WEB_SEARCH_ENDPOINT ?? "http://localhost:8888/search";
 let webEndpointHost = null;
 try {
@@ -171,6 +196,9 @@ const webAllowedHosts = allowAllWebHosts
   ? null
   : new Set([webEndpointHost, "localhost", "127.0.0.1"].filter(Boolean).concat(configuredAllowedHosts));
 const webTimeoutMs = Number.parseInt(process.env.WEB_SEARCH_TIMEOUT_MS ?? "10000", 10);
+const webFetchBodyPreviewMax = Number.parseInt(process.env.WEB_FETCH_BODY_PREVIEW_MAX ?? "10000", 10);
+const webSearchRetryEnabled = process.env.WEB_SEARCH_RETRY_ENABLED !== "false"; // default true
+const webSearchMaxRetries = Number.parseInt(process.env.WEB_SEARCH_MAX_RETRIES ?? "2", 10);
 
 const policyMaxSteps = Number.parseInt(process.env.POLICY_MAX_STEPS ?? "8", 10);
 const policyMaxToolCalls = Number.parseInt(process.env.POLICY_MAX_TOOL_CALLS ?? "12", 10);
@@ -291,17 +319,30 @@ const config = {
     model: ollamaModel,
     timeout: Number.isNaN(ollamaTimeout) ? 120000 : ollamaTimeout,
   },
+  openrouter: {
+    apiKey: openRouterApiKey,
+    model: openRouterModel,
+    endpoint: openRouterEndpoint,
+  },
   modelProvider: {
     type: modelProvider,
     defaultModel,
     // Hybrid routing settings
     preferOllama,
-    ollamaFallbackEnabled,
+    fallbackEnabled,
     ollamaMaxToolsForRouting,
-    ollamaFallbackProvider,
+    openRouterMaxToolsForRouting,
+    fallbackProvider,
   },
+  toolExecutionMode,
   server: {
     jsonLimit: process.env.REQUEST_JSON_LIMIT ?? "1gb",
+  },
+  rateLimit: {
+    enabled: rateLimitEnabled,
+    windowMs: rateLimitWindow,
+    max: rateLimitMax,
+    keyBy: rateLimitKeyBy,
   },
   logger: {
     level: process.env.LOG_LEVEL ?? "info",
@@ -319,6 +360,9 @@ const config = {
     allowAllHosts: allowAllWebHosts,
     enabled: true,
     timeoutMs: Number.isNaN(webTimeoutMs) ? 10000 : webTimeoutMs,
+    bodyPreviewMax: Number.isNaN(webFetchBodyPreviewMax) ? 10000 : webFetchBodyPreviewMax,
+    retryEnabled: webSearchRetryEnabled,
+    maxRetries: Number.isNaN(webSearchMaxRetries) ? 2 : webSearchMaxRetries,
   },
   policy: {
     maxStepsPerTurn: Number.isNaN(policyMaxSteps) ? 8 : policyMaxSteps,
