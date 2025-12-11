@@ -45,7 +45,8 @@ describe("Azure OpenAI Routing Tests", () => {
   describe("Hybrid Routing with Azure OpenAI", () => {
     it("should route moderate tool requests to azure-openai when available", () => {
       // Explicitly unset OpenRouter to ensure it's not available
-      delete process.env.OPENROUTER_API_KEY;
+      // Set to empty string instead of delete to prevent dotenv from reloading it
+      process.env.OPENROUTER_API_KEY = "";
 
       process.env.PREFER_OLLAMA = "true";
       process.env.OLLAMA_ENDPOINT = "http://localhost:11434";
