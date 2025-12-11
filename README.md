@@ -682,7 +682,6 @@ Lynkr now supports **native tool calling** for compatible Ollama models:
 - ✅ **Format conversion**: Transparent conversion between Anthropic and Ollama tool formats
 - ❌ **Unsupported models**: llama3, older models (tools are filtered out automatically)
 
-See [OLLAMA-TOOL-CALLING.md](OLLAMA-TOOL-CALLING.md) for implementation details.
 
 **Limitations:**
 
@@ -850,8 +849,6 @@ npm start
 | **Complex requests** | 1500-2500ms | 1500-2500ms | No change (routes to cloud) |
 | **Cost per simple request** | $0.002-0.005 | $0.00 | 100% savings 💰 |
 | **Fallback latency** | N/A | <100ms | Transparent to user |
-
-See [HYBRID-ROUTING-ANALYSIS.md](HYBRID-ROUTING-ANALYSIS.md) for detailed performance analysis.
 
 ### Using Built-in Workspace Tools
 

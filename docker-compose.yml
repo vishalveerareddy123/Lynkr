@@ -9,23 +9,59 @@ services:
       - "8080:8080"
       - "8888:8888"
     environment:
-      # Ollama configuration (points to ollama service)
+      # ============================================================
+      # PRIMARY MODEL PROVIDER
+      # ============================================================
+      # Options: ollama, databricks, azure-anthropic, openrouter
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-ollama}
+
+      # ============================================================
+      # TOOL EXECUTION MODE
+      # ============================================================
+      # Options: server (default), client (passthrough mode)
+      # - server: Tools execute on proxy server
+      # - client: Tools execute on Claude Code CLI (client-side)
+      TOOL_EXECUTION_MODE: ${TOOL_EXECUTION_MODE:-server}
+
+      # ============================================================
+      # OLLAMA CONFIGURATION
+      # ============================================================
       PREFER_OLLAMA: ${PREFER_OLLAMA:-true}
       OLLAMA_ENDPOINT: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:latest}
-      FALLBACK_PROVIDER: ${FALLBACK_PROVIDER:-databricks}
-      FALLBACK_ENABLED: ${FALLBACK_ENABLED:-true}
       OLLAMA_MAX_TOOLS_FOR_ROUTING: ${OLLAMA_MAX_TOOLS_FOR_ROUTING:-3}
 
-      # Databricks fallback configuration
+      # ============================================================
+      # OPENROUTER CONFIGURATION
+      # ============================================================
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-amazon/nova-2-lite-v1:free}
+      OPENROUTER_ENDPOINT: ${OPENROUTER_ENDPOINT:-https://openrouter.ai/api/v1/chat/completions}
+      OPENROUTER_MAX_TOOLS_FOR_ROUTING: ${OPENROUTER_MAX_TOOLS_FOR_ROUTING:-15}
+
+      # ============================================================
+      # HYBRID ROUTING & FALLBACK
+      # ============================================================
+      # Enable/disable fallback to cloud providers
+      FALLBACK_ENABLED: ${FALLBACK_ENABLED:-true}
+      # Fallback provider when Ollama can't handle request
+      FALLBACK_PROVIDER: ${FALLBACK_PROVIDER:-databricks}
+
+      # ============================================================
+      # DATABRICKS CONFIGURATION
+      # ============================================================
       DATABRICKS_API_BASE: ${DATABRICKS_API_BASE:-https://example.cloud.databricks.com}
       DATABRICKS_API_KEY: ${DATABRICKS_API_KEY:-replace-with-databricks-pat}
 
-      # Optional: Azure Anthropic fallback
+      # ============================================================
+      # AZURE ANTHROPIC CONFIGURATION (OPTIONAL)
+      # ============================================================
       AZURE_ANTHROPIC_ENDPOINT: ${AZURE_ANTHROPIC_ENDPOINT:-}
       AZURE_ANTHROPIC_API_KEY: ${AZURE_ANTHROPIC_API_KEY:-}
 
-      # Server configuration
+      # ============================================================
+      # SERVER CONFIGURATION
+      # ============================================================
       PORT: ${PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       WEB_SEARCH_ENDPOINT: ${WEB_SEARCH_ENDPOINT:-http://localhost:8888/search}
